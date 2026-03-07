@@ -1,27 +1,18 @@
 # dfx
-DFX: Digital image processing Functions and eXamples.
+This library provides a collection of basic image‑processing primitives implemented entirely in C, without relying on external libraries.
+
+* read_bitmap() and write_bitmap() load and store 24‑bit packed sRGB images. In memory, these images are represented as arrays of unsigned chars. The parameters “width” and “height” specify the image dimensions.
+
+* srgb_to_linear() and linear_to_srgb() convert between sRGB and linear RGB. In linear RGB form, images are stored as three float arrays: R (red), G (green), and B (blue). Linear representation is fundamental. All color mixing and image‑processing operations in this library are implemented in linear space.
+
+* When converting from sRGB to linear RGB, images may be padded. The parameter “p” defines the number of pixels reserved around the boundary of the original image. Padding is useful for filtering and resampling operations.
  
-This is a collection of basic image processing primitives implemented entirely in C, 
-without reliance on any external libraries. 
- 
-   *  Functions: read_bitmap() / write_bitmap() load and store 24-bit-packed sRGB images. 
-      In memory, such images are presented as unsigned character arrays. Parameters "width" 
-      and "height" define image dimensions. 
-      
-   *  Functions: srgb_to_linear() and linear_to_srgb() perform conversions between sRGB and Linear RGB format. 
-      In linear RGB form, images are stored in memory as 3 arrays of floats, called "R" (red), "G" (green), 
-      and "B" (blue) planes. Linear representation is fundamental. Only in linear space we can mix colors. 
-      All color and image processing operations are implemented in the linear RGB space.
-      
-   *  When images are converted from sRGB format to linear, they can be padded. 
-      Parameter "p" defines the number of pixels to be reserved around the boundary of the original image. 
-      Such padding becomes handy in implementing filtering and scaling operations. 
- 
-   *  Functions linear_to_luminance() and luminance_to_grayscale_image() allow the extraction of luminance 
-      (Y channel in CIE 1931 XYZ space), and translation of luminance to a grayscale RGB image. 
- 
-   *  Functions filter_plane() and filter_image() implement various image filtering operations. 
- 
-   *  Functions dft_plane() and dft_magnitude() and dft_phase() compute Discrete Fourier Transform over an image plane.
- 
- Examples showing how to use these operations can be found in the directory dfx/demos. 
+* linear_to_luminance() and luminance_to_grayscale_image() extract image luminance (the Y channel in CIE 1931 XYZ space) and convert luminance channel into a grayscale RGB image.
+
+* filter_plane() and filter_image() implement a variety of image‑filtering operations.
+
+* resample_plane() and resample_image() implement image‑resampling operations.
+
+*  dft_plane(), dft_magnitude(), and dft_phase() compute the Discrete Fourier Transform of an image plane and extract magnitude and phase.
+
+Examples demonstrating how to use these operations can be found in the dfx/examples directory.
