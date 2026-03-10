@@ -137,7 +137,7 @@ int read_bitmap(char* filename, unsigned char** p_srgb, int* p_width, int* p_hei
 	if (hdr.bfOffBits != sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER)
 		|| bihdr.biCompression != BI_RGB || bihdr.biBitCount != 24 /* we only support 24-bit RGB files now */
 		|| bihdr.biWidth < 8 || bihdr.biHeight < 8 || bihdr.biWidth > 32768 || bihdr.biHeight > 32768 
-		|| bihdr.biSizeImage < size) {
+		|| (bihdr.biSizeImage != 0 && bihdr.biSizeImage < size)) {
 		fclose(fp);
 		return DFX_NOTSUP;
 	}

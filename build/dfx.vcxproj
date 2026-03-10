@@ -29,6 +29,7 @@
     <ClCompile Include="..\src\dfx_filter.c" />
     <ClCompile Include="..\src\dfx_image.c" />
     <ClCompile Include="..\src\dfx_resampler.c" />
+    <ClCompile Include="..\src\dfx_snr.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

@@ -69,6 +69,41 @@ static int subsample_image(float* R_in, float* G_in, float* B_in, float* R_out, 
 }
 
 /*!
+ *  \brief Apply reconstruction filter, produce visualizations, compute SNR/MSE, and print results:
+ * 
+ *  \param[in] n      - filter order
+ *  \param[in] filter - reconstruciton filter type (FILTER_SINC or FILTER_LANCZOS)
+ *  \param[in] fc     - cutoff
+ */
+static int test_reconstruction(float* R_ref, float* G_ref, float* B_ref, float* R_in, float *G_in, float *B_in, float* R_out, float* G_out, float* B_out, unsigned char *sRGB_out,
+	int width, int height, int p, int n, int filter, float fc, char *bmp_fn, int ppm_x, int ppm_y)
+{
+	float snr, mse;
+
+	/* check parameters */
+	if (R_ref == NULL || G_ref == NULL || B_ref == NULL) return DFX_INVARG;
+	if (R_in == NULL || G_in == NULL || B_in == NULL) return DFX_INVARG;
+	if (R_out == NULL || G_out == NULL || B_out == NULL || sRGB_out == NULL) return DFX_INVARG;
+	if (height < 0 || width < 0 || p < 0) return DFX_INVARG;
+	if (bmp_fn == NULL) return DFX_INVARG;
+
+	/* reconstruct image: */
+	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, filter, fc);
+	scale_image(R_out, G_out, B_out, R_out, G_out, B_out, width, height, p, 4.0);
+
+	/* produce bitmap file: */
+	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
+	write_bitmap(bmp_fn, sRGB_out, width, height, ppm_x, ppm_y);
+
+	/* compute MSE, SNR: */
+	snr_image(R_ref, G_ref, B_ref, R_out, G_out, B_out, width, height, p, &mse, &snr);
+	printf("original vs %s: mse=%g, snr=%g[db]\n", bmp_fn, mse, snr);
+
+	/* success: */
+	return DFX_SUCCESS;
+}
+
+/*!
  *  \brief An example program illustrating the effects of aliasing, and their prevention by using proper low-pass filters.
  */
 int main(int argc, char* argv[])
@@ -79,13 +114,14 @@ int main(int argc, char* argv[])
 	/* images and planes: */
 	unsigned char* sRGB_in = NULL, *sRGB_out = NULL;
 	float *R_in = NULL, *G_in = NULL, *B_in = NULL;
-	float *R_temp = NULL, * G_temp = NULL, * B_temp = NULL;
+	float* R_lp = NULL, * G_lp = NULL, * B_lp = NULL;
+	float *R_ss = NULL, * G_ss = NULL, * B_ss = NULL;
 	float* R_out = NULL, * G_out = NULL, * B_out = NULL;
 
 	/* padding & filter parameters: */
-	int p = 10;
+	int p = 50;
 	float fc = 0.25;								
-	int n = 5;
+	int n = 3;
 
 	/* some basic checks: */
 	if (n > p) {
@@ -111,79 +147,55 @@ int main(int argc, char* argv[])
 	/* allocate working images and planes: */
 	if (alloc_srgb_image(&sRGB_out, width, height) != DFX_SUCCESS
 		|| alloc_image(&R_in, &G_in, &B_in, width, height, p) != DFX_SUCCESS
-		|| alloc_image(&R_temp, &G_temp, &B_temp, width, height, p) != DFX_SUCCESS
+		|| alloc_image(&R_lp, &G_lp, &B_lp, width, height, p) != DFX_SUCCESS
+		|| alloc_image(&R_ss, &G_ss, &B_ss, width, height, p) != DFX_SUCCESS
 		|| alloc_image(&R_out, &G_out, &B_out, width, height, p) != DFX_SUCCESS) {
 		printf("Error: cannot allocate memory for images\n");
 		/* free memory and exit: */
 		if (sRGB_in != NULL) free_srgb_image(sRGB_in);
 		if (sRGB_out != NULL) free_srgb_image(sRGB_out);
 		if (R_in != NULL && G_in != NULL && B_in != NULL) free_image(R_in, G_in, B_in);
-		if (R_temp != NULL && G_temp != NULL && B_temp != NULL) free_image(R_temp, G_temp, B_temp);
+		if (R_lp != NULL && G_lp != NULL && B_lp != NULL) free_image(R_lp, G_lp, B_lp);
+		if (R_ss != NULL && G_ss != NULL && B_ss != NULL) free_image(R_ss, G_ss, B_ss);
 		if (R_out != NULL && G_out != NULL && B_out != NULL) free_image(R_out, G_out, B_out);
 		return 1;
 	}
 
-	/* convert to linear RGB: */
+	/* convert to linear: */
 	srgb_to_linear(sRGB_in, R_in, G_in, B_in, width, height, p);
 	linear_to_srgb(sRGB_out, R_in, G_in, B_in, width, height, p);
-	write_bitmap("dfx_aliasing_demo_original.bmp", sRGB_out, width, height, ppm_x, ppm_y);
+	write_bitmap("original.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
-	/* tests without low-pass filter: */
+	/* produce a low-pass version (20-th order sinc filter): */
+	filter_image(R_in, G_in, B_in, R_lp, G_lp, B_lp, width, height, p, 20, FILT_SINC, fc);
+	pad_image(R_lp, G_lp, B_lp, width, height, p, PAD_REFLECT);
+	linear_to_srgb(sRGB_out, R_lp, G_lp, B_lp, width, height, p);
+	write_bitmap("lowpass.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
-	/* subsample without pre-filtering: */
-	subsample_image(R_in, G_in, B_in, R_temp, G_temp, B_temp, width, height, p);
-	linear_to_srgb(sRGB_out, R_temp, G_temp, B_temp, width, height, p);
-	write_bitmap("dfx_aliasing_demo_subsampled.bmp", sRGB_out, width, height, ppm_x, ppm_y);
+	/* subsample original image: */
+	subsample_image(R_in, G_in, B_in, R_ss, G_ss, B_ss, width, height, p);
+	linear_to_srgb(sRGB_out, R_ss, G_ss, B_ss, width, height, p);
+	write_bitmap("original_subsampled.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
-	/* apply Gaussian filter: */
-	filter_image(R_temp, G_temp, B_temp, R_out, G_out, B_out, width, height, p, n, FILT_GAUSS, fc);
-	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
-	write_bitmap("dfx_aliasing_demo_subsampled_gauss_rec.bmp", sRGB_out, width, height, ppm_x, ppm_y);
+	/* run reconstruction tests: */
+	test_reconstruction(R_in, G_in, B_in, R_ss, G_ss, B_ss, R_out, G_out, B_out, sRGB_out, width, height, p, n, FILT_SINC, fc, "sync_reconstructed.bmp", ppm_x, ppm_y);
+	test_reconstruction(R_in, G_in, B_in, R_ss, G_ss, B_ss, R_out, G_out, B_out, sRGB_out, width, height, p, n, FILT_LANCZOS, fc, "lanczos_reconstructed.bmp", ppm_x, ppm_y);
 
-	/* apply sinc filter: */
-	filter_image(R_temp, G_temp, B_temp, R_out, G_out, B_out, width, height, p, n, FILT_SINC, fc);
-	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
-	write_bitmap("dfx_aliasing_demo_subsampled_sinc_rec.bmp", sRGB_out, width, height, ppm_x, ppm_y);
+	/* subsample lowpass image: */
+	subsample_image(R_lp, G_lp, B_lp, R_ss, G_ss, B_ss, width, height, p);
+	linear_to_srgb(sRGB_out, R_ss, G_ss, B_ss, width, height, p);
+	write_bitmap("lowpass_subsampled.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
-	/* apply Lanczos filter: */
-	filter_image(R_temp, G_temp, B_temp, R_out, G_out, B_out, width, height, p, n, FILT_LANCZOS, fc);
-	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
-	write_bitmap("dfx_aliasing_demo_subsampled_lanczos_rec.bmp", sRGB_out, width, height, ppm_x, ppm_y);
-
-	/* tests with low-pass filter: */
-
-	/* using Gaussian filter: */
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_GAUSS, fc);
-	subsample_image(R_out, G_out, B_out, R_temp, G_temp, B_temp, width, height, p);
-	linear_to_srgb(sRGB_out, R_temp, G_temp, B_temp, width, height, p);
-	write_bitmap("dfx_aliasing_demo_gauss_lp_subsampled.bmp", sRGB_out, width, height, ppm_x, ppm_y);
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_GAUSS, fc);
-	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
-	write_bitmap("dfx_aliasing_demo_gauss_lp_subsampled_gauss_rec.bmp", sRGB_out, width, height, ppm_x, ppm_y);
-
-	/* apply sinc filter: */
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_SINC, fc);
-	subsample_image(R_out, G_out, B_out, R_temp, G_temp, B_temp, width, height, p);
-	linear_to_srgb(sRGB_out, R_temp, G_temp, B_temp, width, height, p);
-	write_bitmap("dfx_aliasing_demo_sinc_lp_subsampled.bmp", sRGB_out, width, height, ppm_x, ppm_y);
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_SINC, fc);
-	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
-	write_bitmap("dfx_aliasing_demo_sinc_lp_subsampled_sinc_rec.bmp", sRGB_out, width, height, ppm_x, ppm_y);
-
-	/* apply Lanczos filter: */
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_LANCZOS, fc);
-	subsample_image(R_out, G_out, B_out, R_temp, G_temp, B_temp, width, height, p);
-	linear_to_srgb(sRGB_out, R_temp, G_temp, B_temp, width, height, p);
-	write_bitmap("dfx_aliasing_demo_lanczos_lp_subsampled.bmp", sRGB_out, width, height, ppm_x, ppm_y);
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_LANCZOS, fc);
-	linear_to_srgb(sRGB_out, R_out, G_out, B_out, width, height, p);
-	write_bitmap("dfx_aliasing_demo_lanczos_lp_subsampled_lanczos_rec.bmp", sRGB_out, width, height, ppm_x, ppm_y);
+	/* run reconstruction tests: */
+	test_reconstruction(R_in, G_in, B_in, R_ss, G_ss, B_ss, R_out, G_out, B_out, sRGB_out, width, height, p, n, FILT_SINC, fc, "lowpass_sync_reconstructed.bmp", ppm_x, ppm_y);
+	test_reconstruction(R_in, G_in, B_in, R_ss, G_ss, B_ss, R_out, G_out, B_out, sRGB_out, width, height, p, n, FILT_LANCZOS, fc, "lowpass_lanczos_reconstructed.bmp", ppm_x, ppm_y);
 
 	/* free memory and exit: */
 	free_srgb_image(sRGB_in);
 	free_srgb_image(sRGB_out);
 	free_image(R_in, G_in, B_in);
-	free_image(R_temp, G_temp, B_temp);
+	free_image(R_lp, G_lp, B_lp);
+	free_image(R_ss, G_ss, B_ss);
 	free_image(R_out, G_out, B_out);
 	return 0;
 }

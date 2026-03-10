@@ -14,13 +14,14 @@
 #include "dfx.h"
 
  /*!
-  *  \brief Test resampling operation.
+  *  \brief Test resampler operation.
   *
   *  \param[in] fn_in      - name of input bitmap file to use for scaling
   *  \param[in] fn_out     - name of output bitmap to create to store the results
   *  \param[in] M,N        - rational scaling factor (M/N) to apply 
+  *  \param[in] n          - filter order to use
   */
-static void test_resampling(unsigned char* fn_in, char* fn_out, int M, int N)
+static void test_resampler(unsigned char* fn_in, char* fn_out, int M, int N, int n)
 {
 	/* image parameters: */
 	int width_in = 0, height_in = 0, ppm_x = 0, ppm_y = 0;
@@ -31,12 +32,12 @@ static void test_resampling(unsigned char* fn_in, char* fn_out, int M, int N)
 	float* R_in = NULL, * G_in = NULL, * B_in = NULL;
 	float* R_out = NULL, * G_out = NULL, * B_out = NULL;
 
-	/* padding & filter order parameters */
+	/* padding: */
 	int p = 10;
-	int n = 5;
+	if (p < n) p = n;
 
 	/* print test type: */
-	printf("Testing conversion: %s -> %s, applying scale factor: %d/%d\n", fn_in, fn_out, M, N);
+	printf("Testing conversion: %s -> %s, scale factor: %d/%d, filter order: %d\n", fn_in, fn_out, M, N, n);
 
 	/* read input file: */
 	if (read_bitmap(fn_in, &sRGB_in, &width_in, &height_in, &ppm_x, &ppm_y) != DFX_SUCCESS) {
@@ -113,16 +114,38 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	/* test resamping by various factors: */
-	test_resampling(argv[1], "dfx_double.bmp", 2, 1);
-	test_resampling(argv[1], "dfx_triple.bmp", 3, 1);
-	test_resampling(argv[1], "dfx_quadruple.bmp", 4, 1);
-	test_resampling(argv[1], "dfx_half.bmp", 1, 2);
-	test_resampling(argv[1], "dfx_third.bmp", 1, 3);
-	test_resampling(argv[1], "dfx_quarter.bmp", 1, 4);
-	test_resampling(argv[1], "dfx_two_thirds.bmp", 2, 3);
-	test_resampling(argv[1], "dfx_four_thirds.bmp", 4, 3);
-	test_resampling(argv[1], "dfx_three_quarters.bmp", 3, 4);
+	/* test resamping by filter with n=3: */
+	test_resampler(argv[1], "dfx_double_3.bmp",          2, 1, 3);
+	test_resampler(argv[1], "dfx_triple_3.bmp",          3, 1, 3);
+	test_resampler(argv[1], "dfx_quadruple_3.bmp",       4, 1, 3);
+	test_resampler(argv[1], "dfx_half_3.bmp",            1, 2, 3);
+	test_resampler(argv[1], "dfx_third_3.bmp",           1, 3, 3);
+	test_resampler(argv[1], "dfx_quarter_3.bmp",         1, 4, 3);
+	test_resampler(argv[1], "dfx_two_thirds_3.bmp",      2, 3, 3);
+	test_resampler(argv[1], "dfx_four_thirds_3.bmp",     4, 3, 3);
+	test_resampler(argv[1], "dfx_three_quarters_3.bmp",  3, 4, 3);
+
+	/* test resamping by filter with n=5: */
+	test_resampler(argv[1], "dfx_double_5.bmp",          2, 1, 5);
+	test_resampler(argv[1], "dfx_triple_5.bmp",          3, 1, 5);
+	test_resampler(argv[1], "dfx_quadruple_5.bmp",       4, 1, 5);
+	test_resampler(argv[1], "dfx_half_5.bmp",            1, 2, 5);
+	test_resampler(argv[1], "dfx_third_5.bmp",           1, 3, 5);
+	test_resampler(argv[1], "dfx_quarter_5.bmp",         1, 4, 5);
+	test_resampler(argv[1], "dfx_two_thirds_5.bmp",      2, 3, 5);
+	test_resampler(argv[1], "dfx_four_thirds_5.bmp",     4, 3, 5);
+	test_resampler(argv[1], "dfx_three_quarters_5.bmp",  3, 4, 5);
+
+	/* test resamping by filter with n=7: */
+	test_resampler(argv[1], "dfx_double_7.bmp",          2, 1, 7);
+	test_resampler(argv[1], "dfx_triple_7.bmp",          3, 1, 7);
+	test_resampler(argv[1], "dfx_quadruple_7.bmp",       4, 1, 7);
+	test_resampler(argv[1], "dfx_half_7.bmp",            1, 2, 7);
+	test_resampler(argv[1], "dfx_third_7.bmp",           1, 3, 7);
+	test_resampler(argv[1], "dfx_quarter_7.bmp",         1, 4, 7);
+	test_resampler(argv[1], "dfx_two_thirds_7.bmp",      2, 3, 7);
+	test_resampler(argv[1], "dfx_four_thirds_7.bmp",     4, 3, 7);
+	test_resampler(argv[1], "dfx_three_quarters_7.bmp",  3, 4, 7);
 
 	/* all done */
 	return 0;

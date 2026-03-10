@@ -41,5 +41,8 @@
     <ClCompile Include="..\src\dfx_resampler.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\dfx_snr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

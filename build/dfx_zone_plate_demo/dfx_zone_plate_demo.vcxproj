@@ -24,6 +24,7 @@
     <ProjectGuid>{bba7a8ca-b692-4319-80ed-22783a969d75}</ProjectGuid>
     <RootNamespace>dfxzoneplatedemo</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>dfx_zone_plate_demo</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

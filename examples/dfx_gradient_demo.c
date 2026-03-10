@@ -65,8 +65,8 @@ static int generate_gradient(float* Y, int width, int height, int p, int gamma)
 int main()
 {
 	/* assumed image geometry: */
-	int height = 1024;
-	int width = 1024;
+	int height = 4098;
+	int width = 4098;
 	int ppm_x = 1024;	// 96 DPI pixel density
 	int ppm_y = 1024;
 

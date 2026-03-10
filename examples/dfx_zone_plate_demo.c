@@ -37,10 +37,11 @@
  *  \param[in]      width   - image width in pixels;
  *  \param[in]      height  - image height in pixels;
  *  \param[in]      p       - padding parameter
+ *  \param[in]      fc      - cutoff frequency 
  * 
  *  \return         DFX_SUCCESS if success, or an error code otherwise.
  */
-static int generate_zone_plate(float *y, int width, int height, int p)
+static int generate_zone_plate(float *y, int width, int height, int p, float fc)
 {
 	float r, rm, km, w, g;
 	int i, j, di, dj;
@@ -50,7 +51,7 @@ static int generate_zone_plate(float *y, int width, int height, int p)
 		return DFX_INVARG;
 
 	/* set parameters: */
-	km = (float)M_PI;									/* touch Nyquist at boundary*/
+	km = (float)(2 * M_PI * fc);
 	rm = (float)( min(width, height) / 2.0f);
 	w = rm / 10.0f;						
 
@@ -82,6 +83,9 @@ int main()
 	int ppm_x = 1024;	// 96 DPI pixel density
 	int ppm_y = 1024;
 
+	/* max frequency */
+	float fc = 0.5f;
+
 	/* linear and srgb images/planes: */
 	unsigned char *sRGB = NULL;
 	float *R=NULL, *G=NULL, *B = NULL, *Y=NULL;
@@ -99,7 +103,7 @@ int main()
 	}
 
 	/* generate zone-plate image: */
-	generate_zone_plate(Y, width, height, 0);
+	generate_zone_plate(Y, width, height, 0, fc);
 
 	/* convert it to grayscale image: */
 	luminance_to_grayscale_image(Y, R, G, B, width, height, 0);

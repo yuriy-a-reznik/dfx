@@ -1,9 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>zone-plate-726x726.bmp </LocalDebuggerCommandArguments>
-    <LocalDebuggerWorkingDirectory>.\x64\Debug</LocalDebuggerWorkingDirectory>
+    <LocalDebuggerCommandArguments>k04_xlarge.bmp </LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>..\x64\Debug</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
-    <LocalDebuggerCommandArgumentsHistory>zone-plate.bmp|zone-plate-726x276.bmp|zone-plate-726x726.bmp |</LocalDebuggerCommandArgumentsHistory>
+    <LocalDebuggerCommandArgumentsHistory>zone-plate.bmp|zone-plate-726x276.bmp|zone-plate-726x726.bmp |dfx-zone-plate.bmp |k04_xlarge.bmp |</LocalDebuggerCommandArgumentsHistory>
   </PropertyGroup>
 </Project>

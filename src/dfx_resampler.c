@@ -34,7 +34,7 @@
 /*!
  *  \brief Generate an array of LP filter coefficients.
  *
- *  This function uses the classic 2n+1=point sinc filter smoothed by Lanczos window.
+ *  This function uses the classic 2n+1=point sinc filter smoothed by the Lanczos window.
  *  This array of coefficients is allocated and returned by a pointer *p_w.
  *  The calling application is responsible for freeing it when it is no longer needed.
  * 
@@ -62,11 +62,11 @@ static int gen_coeffs(float **p_w, int n, float fc)
     /* generate filter coefficients: */
     for (x = -n; x <= n; x++) {
         if (x != 0) {
-            s = sin(2 * M_PI * fc * x) / (M_PI * x);                   /* sinc filter */
-            l = sin(M_PI * x / (double)n) / (M_PI * x / (double) n);   /* Lanczos window */
+            s = sin(2 * M_PI * fc * x) / (M_PI * x);                     /* sinc filter */
+            l = sin(M_PI * x / (double)n) / (M_PI * x / (double) n);     /* Lanczos window */
             w[n + x] = (float)(s * l);
         } else {
-            w[n + x] = 2 * fc;                                         /* limit at x --> 0 */
+            w[n + x] = 2 * fc;                                           /* limit at x --> 0 */
         }
     }
 
@@ -152,6 +152,7 @@ static int gen_polyphase_coeffs(float **p_W, int dim_in, int dim_out, int n)
 
     /* set cutoff: */
     fc = (M < N) ? 0.5f / (float)N : 0.5f / (float)M; 
+    //printf("fc = %g\n", fc);
 
     /* generate filter coefficients: */
     if (gen_coeffs(&w, M * n, fc) != DFX_SUCCESS)

@@ -137,6 +137,10 @@ extern int dft_plane(float* x, float* reX, float* imX, int width, int height, in
 extern int dft_magnitude(float* reX, float* imX, float* magX, int width, int height, int p);
 extern int dft_phase(float* reX, float* imX, float* phaseX, int width, int height, int p);
 
+/* Signal-to-noise metric (dfx-snr.c): */
+extern int snr_plane(float* X_ref, float* X_test, int width, int height, int p, float* p_MSE, float* p_SNR);
+extern int snr_image(float* R_ref, float* G_ref, float* B_ref, float* R_test, float* G_test, float* B_test, int width, int height, int p, float* p_MSE, float* p_SNR);
+
 #ifdef __cplusplus
 }
 #endif
