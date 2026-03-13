@@ -21,7 +21,7 @@
   *  \param[in] M,N        - rational scaling factor (M/N) to apply 
   *  \param[in] n          - filter order to use
   */
-static void test_resampler(unsigned char* fn_in, char* fn_out, int M, int N, int n)
+static void test_resampler(char* fn_in, char* fn_out, int M, int N, int n)
 {
 	/* image parameters: */
 	int width_in = 0, height_in = 0, ppm_x = 0, ppm_y = 0;
