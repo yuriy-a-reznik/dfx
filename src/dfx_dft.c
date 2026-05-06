@@ -280,7 +280,7 @@ int dft_magnitude(float* reF, float* imF, float* magF, int width, int height, in
 	/* compute magnitude: */
 	for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
 		re = reF[(y + p) * (width + 2 * p) + x + p];
-		im = reF[(y + p) * (width + 2 * p) + x + p];
+		im = imF[(y + p) * (width + 2 * p) + x + p];
 		mag = sqrtf(re*re + im*im);
 		magF[(y + p) * (width + 2 * p) + x + p] = mag;
 	}
@@ -312,7 +312,7 @@ int dft_phase(float* reF, float* imF, float* phaseF, int width, int height, int 
 	/* compute phase: */
 	for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
 		re = reF[(y + p) * (width + 2 * p) + x + p];
-		im = reF[(y + p) * (width + 2 * p) + x + p];
+		im = imF[(y + p) * (width + 2 * p) + x + p];
 		phase = atan2f(im, re);
 		phaseF[(y + p) * (width + 2 * p) + x + p] = phase;
 	}

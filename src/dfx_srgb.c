@@ -194,16 +194,16 @@ int linear_to_srgb_dithered(float* R, float* G, float* B, unsigned char* sRGB, i
 			dR = R[(p + y) * w_lin + p + x] - to_linear(rec_8bit(sRGB[(height-1-y) * w_srgb + x * 3 + 2]));
 
 			/* distribute noise using Floyd-Steinberg diffusion filter: */
-			B[(p + y) * w_lin + p + x + 1] += dR * 7.f / 16.f;     /* FS (0,+1) */
+			B[(p + y) * w_lin + p + x + 1] += dB * 7.f / 16.f;     /* FS (0,+1) */
 			G[(p + y) * w_lin + p + x + 1] += dG * 7.f / 16.f;
 			R[(p + y) * w_lin + p + x + 1] += dR * 7.f / 16.f;
-			B[(p + y + 1) * w_lin + p + x] += dR * 5.f / 16.f;     /* FS (+1,0) */
+			B[(p + y + 1) * w_lin + p + x] += dB * 5.f / 16.f;     /* FS (+1,0) */
 			G[(p + y + 1) * w_lin + p + x] += dG * 5.f / 16.f;
 			R[(p + y + 1) * w_lin + p + x] += dR * 5.f / 16.f;
-			B[(p + y + 1) * w_lin + p + x - 1] += dR * 3.f / 16.f; /* FS (+1,-1) */
+			B[(p + y + 1) * w_lin + p + x - 1] += dB * 3.f / 16.f; /* FS (+1,-1) */
 			G[(p + y + 1) * w_lin + p + x - 1] += dG * 3.f / 16.f;
 			R[(p + y + 1) * w_lin + p + x - 1] += dR * 3.f / 16.f;
-			B[(p + y + 1) * w_lin + p + x + 1] += dR * 1.f / 16.f; /* FS (+1,+1) */
+			B[(p + y + 1) * w_lin + p + x + 1] += dB * 1.f / 16.f; /* FS (+1,+1) */
 			G[(p + y + 1) * w_lin + p + x + 1] += dG * 1.f / 16.f;
 			R[(p + y + 1) * w_lin + p + x + 1] += dR * 1.f / 16.f;
 		}
