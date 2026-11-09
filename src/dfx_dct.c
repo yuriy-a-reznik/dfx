@@ -5,9 +5,15 @@
  *  This module includes examples of:
  * 
  *     Short length DCT-II modules (n1 = 2,3,4,5,7,9)
- *     PFA method (n1 = 3*5 =15)
- *     Short length DCT-IV models 
- *     Recursive construction of DCT-II of sizes n=2^m * n1, using split in DCT-II and DCT-IV of half-lengths.
+ *     PFA method (n1 = 3*5 = 15)
+ *     Short length DCT-IV modules 
+ *     Recursive construction of DCT-II and DCT-IV of sizes n = 2^m * n1, using splits into transforms of half-lengths.
+ *
+ *  All transforms are unnormalized:
+ *     DCT-II:  X[k] = sum_{j=0}^{n-1} x[j] cos(pi (2j+1) k / (2n)),
+ *     DCT-IV:  X[k] = sum_{j=0}^{n-1} x[j] cos(pi (2j+1)(2k+1) / (4n)).
+ *  The public entry points are dct2_rec() and dct4_rec(); see examples/dfx_dct_demo.c for a test
+ *  against the direct evaluation of these formulas.
  *
  *  Key references: 
  *    DCT via DFT
@@ -15,15 +21,15 @@
  *      R. Haralick, "A Storage Efficient Way to Implement the Discrete Cosine Transform," IEEE Transactions on Computers, vol. C-25, no. 7, pp. 764-765, 1976
  *      M. T. Heideman, "Computation of an odd-length DCT from a real valued DFT of the same length," TSP, vol. 40,no. 1, pp. 54-61, 1992.
  *    Prime factor method
- *      C.S.Burrus and T.W.Parks, "DFT/FFT and convolution algorithms: theory and implementation," John Wiley & Sons, Inc., 1991.
+ *      C.S.Burrus and T.W.Parks, "DFT/FFT and convolution algorithms: theory and implementation," John Wiley & Sons, Inc., 1985.
  *      P. Yang and M. Narasimha, "Prime factor decomposition of the discrete cosine transform," ICASSP, 1985.   
  *      B. G. Lee, "Input and output index mapping for a prime-factor decomposed computation of discrete cosine transform," TASSP, vol. 37, no. 2, 1989.
  *    Connection between DCT-II and DCT-IV
  *      C.W. Kok, "Fast Algorithm for Computing Discrete Cosine Transform", IEEE Trans. Signal Proc., vol.45, no.3, pp.757-760, Mar 1997
- *    Dyadic DCT-II and DCT-VI factorizations
+ *    Dyadic DCT-II and DCT-IV factorizations
  *      W.-H. Chen, C. Smith and S. Fralick, "A Fast Computational Algorithm for the Discrete Cosine Transform," IEEE Trans. Communications, vol. 25, no. 9, pp. 1004-1009, 1977
  *      Z. Wang, On Computing the Discrete Fourier and Cosine Transforms, IEEE Trans. ASSP, Vol 33, No. 4, Oct. 1985.
- *      G.Plonka and M.Tashe, "Fast and numerically stable algorithms for discrete cosine transforms", Linear Algebra and Applications, 394 (1) 309-345 (2005). 
+ *      G. Plonka and M. Tasche, "Fast and numerically stable algorithms for discrete cosine transforms", Linear Algebra and its Applications, vol. 394, pp. 309-345, 2005. 
  *      R. Joshi, Y. Reznik, and M. Karczewicz, "Efficient large size transforms for high-performance video coding", Proc. SPIE Vol. 7798, pp. 779831-1--7, 2010.
  *      V. Britanak, P. Yip, K. R. Rao, "Discrete Cosine and Sine Transforms: General Properties, Fast Algorithms and Integer Approximations", Academic Press, 2006.
  *    Recursive non-dyadic factorizations:
@@ -34,11 +40,10 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -176,13 +181,13 @@ static void dct2_5(float* x)
 static void dct2_7(float* x)
 {
     const float C71 = -1.1666666666666667f;  /* -7/6 */
-    const float C72 = -0.7901560896121518f;  /* -(2cos u - cos2u - cos3u)/3, u=2pi/7 */
-    const float C73 = -0.0558537874849908f;  /* -(cos u - 2cos2u + cos3u)/3, u=2pi/7 */
-    const float C74 = 0.7343021342664287f;   /*  (cos u + cos2u - 2cos3u)/3, u=2pi/7 */
-    const float C75 = 0.4409591763108903f;   /*  (sin u + sin2u - sin3u)/3, u=2pi/7  */
-    const float C76 = -0.3408730336181886f;  /* -(2sin u - sin2u + sin3u)/3, u=2pi/7 */
-    const float C77 = -0.5339694823505409f;  /*  (sin u - 2sin2u - sin3u)/3, u=2pi/7 */
-    const float C78 = 0.8748419904388223f;   /*  (sin u + sin2u + 2sin3u)/3, u=2pi/7 */
+    const float C72 = -0.7901564685254002f;  /* -(2cos u - cos2u - cos3u)/3, u=2pi/7 */
+    const float C73 = -0.0558542672896477f;  /* -(cos u - 2cos2u + cos3u)/3, u=2pi/7 */
+    const float C74 = 0.7343022012357524f;   /*  (cos u + cos2u - 2cos3u)/3, u=2pi/7 */
+    const float C75 = 0.4409585518440984f;   /*  (sin u + sin2u - sin3u)/3, u=2pi/7  */
+    const float C76 = -0.3408729306239314f;  /* -(2sin u - sin2u + sin3u)/3, u=2pi/7 */
+    const float C77 = -0.5339693603377252f;  /*  (sin u - 2sin2u - sin3u)/3, u=2pi/7 */
+    const float C78 = 0.8748422909616567f;   /*  (sin u + sin2u + 2sin3u)/3, u=2pi/7 */
 
     float a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16;
     float m1, m2, m3, m4, m5, m6, m7, m8, c0, a17, a18, a19, a20, a21, a22, a23;
@@ -239,7 +244,7 @@ static void dct2_7(float* x)
 static void dct2_9(float* x)
 {
     const float C31 = -0.8660254037844386f; /* -sqrt(3)/2        */
-    const float C92 = 0.9396926207859084f;  /* cos(4u), u=2pi/9 */
+    const float C92 = 0.9396926207859084f;  /* -cos(4u) = cos(pi/9), u=2pi/9 */
     const float C93 = -0.1736481776746724f; /* -cos(2u), u=2pi/9 */
     const float C94 = -0.7660444431189780f; /* -cos(u), u=2pi/9  */
     const float C95 = 0.5f;
@@ -311,22 +316,22 @@ static void dct2_9(float* x)
  */
 static void dct2_15(float* x)
 {
-    const float C1 = -1.25f;                /* 1/2*(cos(a) + cos(2a)), a=-2*Pi/5 => -1.25 */
+    const float C1 = -1.25f;                /* 1/2*(cos(a) + cos(2a)) - 1, a=-2*Pi/5 => -1.25 */
     const float C2 = 0.559016994374947f;    /* 1/2*(cos(a) - cos(2a)), a=-2*Pi/5 */
     const float C3 = -1.53884176858763f;    /* sin(a) + sin(2a), a=-2*Pi/5 */
-    const float C4 = 0.587785252292473f;    /* sin(2a), a=-2*Pi/5 */
+    const float C4 = 0.587785252292473f;    /* -sin(2a), a=-2*Pi/5 */
     const float C5 = -0.36327126400268f;    /* sin(a) - sin(2a), a=-2*Pi/5 */
     const float C6 = -1.5f;                 /* cos(b)-1, b=-2*Pi/3 => -3/2 */
     const float C7 = 1.875f;                /* C1 * C6 => 15/8 */
     const float C8 = -0.838525491562421f;   /* C2 * C6 */
     const float C9 = 2.30826265288144f;     /* C3 * C6 */
-    const float C10 = 0.88167787843871f;    /* C4 * C2 */
+    const float C10 = 0.88167787843871f;    /* -C4 * C6 */
     const float C11 = 0.54490689600402f;    /* C5 * C6 */
     const float C12 = -0.866025403784439f;  /* sin(b), b=-2*Pi/3 */
     const float C13 = 1.08253175473055f;    /* C1 * C12 */
     const float C14 = -0.484122918275927f;  /* C2 * C12 */
     const float C15 = -1.33267606400146f;   /* -C3 * C12 */
-    const float C16 = -0.509036960455127f;  /* C4 * C12  */
+    const float C16 = -0.509036960455127f;  /* C4 * C12 */
     const float C17 = -0.314602143091205f;  /* -C5 * C12 */
 
     float in[15], m[6][3], e[8], o[7];
@@ -360,7 +365,7 @@ static void dct2_15(float* x)
     m[0][0] = s5 + in[7];
     m[1][0] = s5 * C1;
     m[2][0] = (s1 - s3) * C2;
-    m[3][0] = s2 * C3;;
+    m[3][0] = s2 * C3;
     m[4][0] = -(s4 + s2) * C4;
     m[5][0] = s4 * C5;
 
@@ -445,7 +450,7 @@ static void dct2_15(float* x)
  */
 
 /*!
- *  \brief Length 2 DCT-VI 
+ *  \brief Length 2 DCT-IV 
  *
  *   Direct factorization with 2 multiplications and 2 adds
  */
@@ -462,7 +467,7 @@ static void dct4_2(float* x)
 }
 
 /*!
- *  \brief Length 3 DCT-VI 
+ *  \brief Length 3 DCT-IV 
  * 
  *   Direct factorization with 4 multiplications and 6 adds
  */
@@ -486,7 +491,7 @@ static void dct4_3(float* x)
     x[0] = t2 + bx1;
     x[1] = x1; 
     x[2] = t2 - bx1;
-};
+}
 
 /*!
  *  \brief Length 4 DCT-IV:
@@ -531,13 +536,13 @@ static void dct4_5(float* x)
  */
 static void dct4_7(float* x)
 {
-    x[0] *= 1.98742441979f;      /* 2*cos(pi*1,28); */
-    x[1] *= 1.88776666062f;      /* 2*cos(pi*3,28); */
-    x[2] *= 1.69344839846f;      /* 2*cos(pi*5,28); */
-    x[3] *= 1.41421356237f;      /* 2*cos(pi*7,28); */
-    x[4] *= 1.06406415302f;      /* 2*cos(pi*9,28); */
-    x[5] *= 0.660558123910f;     /* 2*cos(pi*11,28); */
-    x[6] *= 0.223928952200f;     /* 2*cos(pi*13,28); */
+    x[0] *= 1.98742441979f;      /* 2*cos(pi*1/28); */
+    x[1] *= 1.88776666062f;      /* 2*cos(pi*3/28); */
+    x[2] *= 1.69344839846f;      /* 2*cos(pi*5/28); */
+    x[3] *= 1.41421356237f;      /* 2*cos(pi*7/28); */
+    x[4] *= 1.06406415302f;      /* 2*cos(pi*9/28); */
+    x[5] *= 0.660558123910f;     /* 2*cos(pi*11/28); */
+    x[6] *= 0.223928952200f;     /* 2*cos(pi*13/28); */
 
     dct2_7(x);
 
@@ -621,33 +626,35 @@ static void dct4_15(float* x)
 
 /*****************
  *
- *  Recursive factorization for DCT-II and DCT-IV transforms of lengths n = 2^m * n1, where n1 = 3,4,5,7,9,15.
+ *  Recursive factorization for DCT-II and DCT-IV transforms of lengths n = 2^m * n1, where n1 = 2,3,4,5,7,9,15.
  *
- *    dct4_rec(float* x, float* y, int n, int n_min);
- *    dct2_rec(float* x, float* y, int n, int n_min);
+ *    dct2_rec(float* x, float* y, int n);
+ *    dct4_rec(float* x, float* y, int n);
  */
 
-int dct2_rec(float *x, float *y, int n);
-int dct4_rec(float *x, float *y, int n);
-
 /*!
- *  \brief Recursive DCT-II of lengths n = 2 ^ m * n1, where n1 = 3, 4, 5, 7, 9, 15.
+ *  \brief Recursive DCT-II of lengths n = 2^m * n1, where n1 = 2, 3, 4, 5, 7, 9, 15.
  *
- *  This function recursively splits DCT-II into computation of DCT-II and DCT-VI of half sizes. 
- *  This is a classic Chen-Smith-Fralick split of the DCT-II transform. 
+ *  This function recursively splits DCT-II into computation of DCT-II and DCT-IV of half sizes. 
+ *  This is a classic Chen-Smith-Fralick split of the DCT-II transform: the even-indexed outputs
+ *  are the DCT-II of the sums x[i] + x[n-1-i], and the odd-indexed outputs are the DCT-IV of the
+ *  differences x[i] - x[n-1-i], i = 0..n/2-1.
  * 
- *  \param[in, out]  x - vector to be transformed
- *  \param[out]      y - temp buffer
- *  \param[in]       n - transform size
+ *  \param[in,out]  x - vector to be transformed (replaced by its transform)
+ *  \param[out]     y - temp buffer of at least n elements
+ *  \param[in]      n - transform size
  *
- *  \returns 0 - success, 1 - unsupported transform size
+ *  \returns DFX_SUCCESS, DFX_INVARG, or DFX_NOTSUP for an unsupported transform size
  */
 int dct2_rec(float *x, float* y, int n)
 {
+    /* check parameters: */
+    if (x == NULL || y == NULL || n < 1) return DFX_INVARG;
+
     /* check if split is possible: */
     if (!(n & 1) && n > 4)
     {
-        int n1 = n / 2, i, err = 0;
+        int n1 = n / 2, i, err;
 
         /* input butterfly: */
         for (i = 0; i < n1; i++) {
@@ -656,9 +663,8 @@ int dct2_rec(float *x, float* y, int n)
         }
 
         /* Chen-Smith-Fralick split in DCT-II and DCT-IV: */
-        err += dct2_rec(y, x, n1);
-        err += dct4_rec(&y[n1], x, n1);
-        if (err) return err;
+        if ((err = dct2_rec(y, x, n1)) != DFX_SUCCESS) return err;
+        if ((err = dct4_rec(&y[n1], x, n1)) != DFX_SUCCESS) return err;
 
         /* re-order and store the results: */
         for (i = 0; i < n1; i++)
@@ -669,38 +675,43 @@ int dct2_rec(float *x, float* y, int n)
     else {
         /* check if we can use one of our small-size transforms: */
         switch (n) {
+        case 1:  break;
+        case 2:  dct2_2(x);  break;
         case 3:  dct2_3(x);  break;
         case 4:  dct2_4(x);  break;
         case 5:  dct2_5(x);  break;
         case 7:  dct2_7(x);  break;
         case 9:  dct2_9(x);  break;
         case 15: dct2_15(x); break;
-        default: return 1;  /* unsupported transform size */
+        default: return DFX_NOTSUP;  /* unsupported transform size */
         }
     }
 
     /* success:*/
-    return 0;
+    return DFX_SUCCESS;
 }
 
  /*!
-  *  \brief Recursive DCT-IV of lengths n = 2^m * n1, where n1 = 3,4,5,7,9,15.
+  *  \brief Recursive DCT-IV of lengths n = 2^m * n1, where n1 = 2,3,4,5,7,9,15.
   *
   *  This function recursively splits DCT-IV into computation of two DCT-II transforms of half sizes. 
-  *  This algorithm is a based on Plonka-Tashe factorization, adapted to unnormalized transforms. 
+  *  This algorithm is based on the Plonka-Tasche factorization, adapted to unnormalized transforms. 
   * 
-  *  \param[in,out]  x - vector to be transformed
-  *  \param[out]     y - temp buffer
+  *  \param[in,out]  x - vector to be transformed (replaced by its transform)
+  *  \param[out]     y - temp buffer of at least n elements
   *  \param[in]      n - transform size
   * 
-  *  \returns 0 - success, !0 - unsupported transform size
+  *  \returns DFX_SUCCESS, DFX_INVARG, or DFX_NOTSUP for an unsupported transform size
   */
 int dct4_rec(float* x, float* y, int n)
 {
+    /* check parameters: */
+    if (x == NULL || y == NULL || n < 1) return DFX_INVARG;
+
     /* check if split is possible: */
     if (!(n & 1) && n > 4)
     {
-        int n1 = n / 2, i, err = 0;
+        int n1 = n / 2, i, err;
         float temp;
 
         /* Givens' rotations: */
@@ -714,11 +725,10 @@ int dct4_rec(float* x, float* y, int n)
             y[i] = -y[i];
 
         /* compute half-length DCT-IIs: */
-        err += dct2_rec(y, x, n1);
-        err += dct2_rec(&y[n1], x, n1);
-        if (err) return err;
+        if ((err = dct2_rec(y, x, n1)) != DFX_SUCCESS) return err;
+        if ((err = dct2_rec(&y[n1], x, n1)) != DFX_SUCCESS) return err;
 
-        /* combination of resuls: */
+        /* combination of results: */
         y += n1;
         for (i = 0; i < n1 / 2; i++) {
             temp = y[i];
@@ -731,7 +741,7 @@ int dct4_rec(float* x, float* y, int n)
         for (i = n1 + 1; i < n; i += 2)
             y[i] = -y[i];
 
-        /* final buttefly: */
+        /* final butterfly: */
         y[n - 1] = -y[n - 1];
         for (i = 1; i < n1; i++) {
             temp = y[i] + y[n1 - 1 + i];
@@ -747,180 +757,20 @@ int dct4_rec(float* x, float* y, int n)
     else {
         /* check if we can use one of our small-size transforms: */
         switch (n) {
+        case 1:  x[0] *= 0.70710678118654752f; break;  /* cos(pi/4) */
+        case 2:  dct4_2(x);  break;
         case 3:  dct4_3(x);  break;
         case 4:  dct4_4(x);  break;
         case 5:  dct4_5(x);  break;
         case 7:  dct4_7(x);  break;
         case 9:  dct4_9(x);  break;
         case 15: dct4_15(x); break;
-        default: return 1;  /* unsupported transform size */
+        default: return DFX_NOTSUP;  /* unsupported transform size */
         }
     }
 
     /* success:*/
-    return 0;
+    return DFX_SUCCESS;
 }
-
-
-#if 0
-
-/**************** 
- * 
- *  Test program and demo
- * 
- *   This is a simple unit test for all above defined functions. 
- * 
- *   It includes reference implementations of DCT-II and DCT-IV, random signal generator, 
- *   and main program that executes and compares the outputs of the above modules agains the reference.
- *   It reports absolute average errors as observed for each transform. 
- * 
- */
-
-#define N_MAX 1024
-
-/*! 
- *  \brief Reference unnormalized DCT-II:
- *
- *   X[k] = sum_{n=0}^{n-1} x[n] * cos( pi*(n+0.5)*k / N), k = 0..N-1
- */
-static void dct2_ref(float *x, float *X, int N)
-{
-    int n, k;
-    /* compute DCT-II */
-    for (n = 0; n < N; n++) {
-        double s = 0.;
-        for (k = 0; k < N; k++)
-            s += x[k] * cos(M_PI * (double)(n * (2 * k + 1)) / (double)(2 * N));
-        X[n] = (float)s;
-    }
-}
-
-/*!
- *  \brief Reference unnormalized DCT-IV:
- *
- *   X[k] = sum_{n=0}^{n-1} x[n] * cos( pi*(n + 0.5)*(k + 0.5) / N), k = 0..N-1
- */
-static void dct4_ref(float *x, float *X, int N)
-{
-    int n, k;
-    for (k = 0; k < N; k++) {
-        double s = 0.;
-        for (n = 0; n < N; n++)
-            s += x[n] * cos(M_PI * (double)(2 * n + 1) * (2 * k + 1)/(double) (4 * N));
-        X[k] = (float)s;
-    }
-}
-
-/*!
- *  \brief Generate random vector for testing
- */
-static void get_test_vector(float* x, int n)
-{
-    int k;
-    for (k = 0; k < n; k++) {
-        x[k] = (float)rand() / (float)RAND_MAX;
-    }
-}
-
-/*!
- *  \brief Compute total absolute error between 2 vectors
- */
-static double abs_err(float *x, float *y, int n)
-{
-    int k; double s = 0;
-    for (k = 0; k < n; k++) {
-        s += fabs(x[k] - y[k]);
-    }
-    return s;
-}
-
-/*! 
- *  Test/demo program: 
- */
-int main()
-{
-    /* test data arrays */
-    static float x[N_MAX];
-    static float X[N_MAX];
-    static float X_ref[N_MAX];
-    static float Y[N_MAX];
-
-    /* transform sizes & functions: */
-    static void (*dct2_test[])(float*) = {dct2_2, dct2_3, dct2_4, dct2_5, dct2_7, dct2_9, dct2_15};
-    static void (*dct4_test[])(float*) = {dct4_2, dct4_3, dct4_4, dct4_5, dct4_7, dct4_9, dct4_15};
-    static int N[] = {2, 3, 4, 5, 7, 9, 15}; 
-    static int M = sizeof(N) / sizeof(N[0]);
-    static int N2[] = {192, 256, 320, 448, 576, 960};
-    static int M2 = sizeof(N2) / sizeof(N2[0]);
-    static int Q = 10;
-
-    /* local variables: */
-    int m, n, q; double s;
-
-    /* test short-lenth transforms: */
-    printf("Short-length transfom modules:\n");
-    for (m = 0; m < M; m++)
-    {
-        /* pick DCT length */
-        n = N[m];
-
-        /* test DCT-II: */
-        printf("Testing %s, n=%d: ", "dct2", n);
-        for (q = 0, s = 0.; q < Q; q++) {
-            get_test_vector(x, n);
-            dct2_ref(x, X_ref, n);
-            memcpy(X, x, n * sizeof(float));
-            dct2_test[m](X);
-            s += abs_err(X, X_ref, n);
-        }
-        printf("err=%g\n", s / (double)(n*Q));
-
-        /* test DCT-IV: */
-        printf("Testing %s, n=%d: ", "dct4", n);
-        for (q = 0, s = 0.; q < Q; q++) {
-            get_test_vector(x, n);
-            dct4_ref(x, X_ref, n);
-            memcpy(X, x, n * sizeof(float));
-            dct4_test[m](X);
-            s += abs_err(X, X_ref, n);
-        }
-        printf("err=%g\n", s / (double)(n * Q));
-    }
-
-    /* test composite-lenth transforms: */
-    printf("Composite-length transfoms:\n");
-    for (m = 0; m < M2; m++)
-    {
-        /* pick DCT length */
-        n = N2[m];
-
-        /* test DCT-II: */
-        printf("Testing %s, n=%d: ", "dct2", n);
-        for (q = 0, s = 0.; q < Q; q++) {
-            get_test_vector(x, n);
-            dct2_ref(x, X_ref, n);
-            memcpy(X, x, n * sizeof(float));
-            dct2_rec(X, Y, n);
-            s += abs_err(X, X_ref, n);
-        }
-        printf("err=%g\n", s / (double)(n * Q));
-
-        /* test DCT-IV: */
-        printf("Testing %s, n=%d: ", "dct4", n);
-        for (q = 0, s = 0.; q < Q; q++) {
-            get_test_vector(x, n);
-            dct4_ref(x, X_ref, n);
-            memcpy(X, x, n * sizeof(float));
-            dct4_rec(X, Y, n);
-            s += abs_err(X, X_ref, n);
-        }
-        printf("err=%g\n", s / (double)(n * Q));
-    }
-
-    /* all done */
-    return 0;
-}
-
-#endif
 
 /* dfx_dct.c -- end of file */

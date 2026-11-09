@@ -8,19 +8,25 @@
  *     PFA method (in-place construction)
  *     DIT and DIF methods
  *
+ *  The public functions fft_dit(), fft_dif(), and fft_pfa() give access to each algorithm, and
+ *  fft() selects between them based on the transform length.
+ *  All transforms compute the unnormalized forward DFT, X[k] = sum_n x[n] exp(-2 pi i n k / N).
+ *
  *  This implementation is based on FORTRAN modules developed in:
- *    C.S.Burrus and T.W.Parks, "DFT/FFT and convolution algorithms: theory and implementation," John Wiley & Sons, Inc., 1991.
+ *    C.S.Burrus and T.W.Parks, "DFT/FFT and convolution algorithms: theory and implementation," John Wiley & Sons, Inc., 1985.
+ *  The prime factor algorithm (PFA) relies on the Chinese remainder theorem index maps:
+ *    C.S.Burrus and P.W.Eschenbacher, "An in-place, in-order prime factor FFT algorithm," IEEE Trans. ASSP, vol. 29, no. 4, pp. 806-817, Aug. 1981.
  * 
  *  Copyright (c) 2026 Yuriy A. Reznik
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
+#include <stddef.h>
 #include "dfx.h"
 
 /**********************
@@ -662,7 +668,7 @@ static void wfta_16(float* xr, float* xi, int * idx, int * ip)
  *  Prime Factor FFT 
  * 
  *   - compute_lp() - computes permutation table
- *   - compute_index_maps() - computes idex map
+ *   - compute_index_maps() - computes index map
  *   - pfa_fft() - main PFA FFT program
  */ 
 
@@ -723,7 +729,7 @@ static void compute_index_maps(int* idx, int* ip, int * lp, int j0, int n1, int 
  *  \param m    Number of prime factors.
  *  \param ni   Array of length m containing the factors (ni[0]*...*ni[m-1] = n).
  */
-static void fft_pfa(float* xr, float* xi, int n, int m, int * ni)
+static void pfa_fft(float* xr, float* xi, int n, int m, int * ni)
 {
     int idx[16];
     int ip[16];
@@ -757,10 +763,10 @@ static void fft_pfa(float* xr, float* xi, int n, int m, int * ni)
 
 /**************
  *
- *  Decimation in Time (DIT) and Decimation in Frequency (DIT) methods. 
+ *  Decimation in Time (DIT) and Decimation in Frequency (DIF) methods. 
  *
- *   - fft_dit() - decimation in time FFT
- *   - fft_dif() - decimation in frequency FFT
+ *   - radix2_dif() - decimation in frequency FFT
+ *   - radix2_dit() - decimation in time FFT
  */
 
 /*!
@@ -771,7 +777,7 @@ static void fft_pfa(float* xr, float* xi, int n, int m, int * ni)
  *  \param[in]      n - transform size
  *  \param[in]      m - logarithm of transform size
  */
-static void fft_dif(float* x, float* y, int n, int m)
+static void radix2_dif(float* x, float* y, int n, int m)
 {
     int i, j, k, l;
     int n1, n2;
@@ -838,7 +844,7 @@ static void fft_dif(float* x, float* y, int n, int m)
  *  \param[in]      n - transform size
  *  \param[in]      m - logarithm of transform size
  */
-static void fft_dit(float* x, float* y, int n, int m)
+static void radix2_dit(float* x, float* y, int n, int m)
 {
     int i, j, k, l;
     int n1, n2;
@@ -894,6 +900,117 @@ static void fft_dit(float* x, float* y, int n, int m)
         }
         n2 <<= 1;  /* N2 = N2 + N2 */
     }
+}
+
+/**************
+ *
+ *  Public interface:
+ *
+ *   - log2_int() - log2 of a power of two
+ *   - pfa_factors() - factor a length into WFTA module sizes
+ *   - fft_dit() - radix-2 decimation-in-time FFT of a power-of-two length
+ *   - fft_dif() - radix-2 decimation-in-frequency FFT of a power-of-two length
+ *   - fft_pfa() - prime factor FFT of a length composed of mutually prime WFTA module sizes
+ *   - fft() - FFT of any supported length
+ */
+
+/*!
+ *  \brief Return m such that n = 2^m, or -1 if n is not a power of two.
+ */
+static int log2_int(int n)
+{
+    int m = 0;
+    if (n < 1 || (n & (n - 1)) != 0) return -1;
+    while ((1 << m) < n) m++;
+    return m;
+}
+
+/*!
+ *  \brief Factor n into mutually prime WFTA module sizes from {2,3,4,5,7,8,9,16}.
+ *
+ *  The power of 2 dividing n must be at most 16, the power of 3 at most 9, and n may contain
+ *  single factors 5 and 7. 
+ *
+ *  \param[in]   n   - transform length
+ *  \param[out]  ni  - array of at least 4 elements to receive the factors
+ *
+ *  \returns     the number of factors, or 0 if n cannot be factored this way
+ */
+static int pfa_factors(int n, int* ni)
+{
+    int m = 0, rest = n, f;
+    if (n < 2) return 0;
+    for (f = 16; f >= 2; f /= 2) if (rest % f == 0) { ni[m++] = f; rest /= f; break; }   /* 16, 8, 4, or 2 */
+    if (rest % 9 == 0) { ni[m++] = 9; rest /= 9; } else if (rest % 3 == 0) { ni[m++] = 3; rest /= 3; }
+    if (rest % 5 == 0) { ni[m++] = 5; rest /= 5; }
+    if (rest % 7 == 0) { ni[m++] = 7; rest /= 7; }
+    return (rest == 1) ? m : 0;	/* a leftover factor means too high a power of 2 or 3, or a prime > 7 */
+}
+
+/*!
+ *  \brief In-place radix-2 decimation-in-time FFT.
+ *
+ *  \param[in,out]  re, im - real and imaginary parts of the input, replaced by those of the spectrum
+ *  \param[in]      n      - transform length, a power of two
+ *
+ *  \returns        DFX_SUCCESS, DFX_INVARG, or DFX_NOTSUP if n is not a power of two
+ */
+int fft_dit(float* re, float* im, int n)
+{
+    int m;
+    if (re == NULL || im == NULL || n < 1) return DFX_INVARG;
+    if ((m = log2_int(n)) < 0) return DFX_NOTSUP;
+    if (m > 0) radix2_dit(re, im, n, m);
+    return DFX_SUCCESS;
+}
+
+/*!
+ *  \brief In-place radix-2 decimation-in-frequency FFT (same interface as fft_dit()).
+ */
+int fft_dif(float* re, float* im, int n)
+{
+    int m;
+    if (re == NULL || im == NULL || n < 1) return DFX_INVARG;
+    if ((m = log2_int(n)) < 0) return DFX_NOTSUP;
+    if (m > 0) radix2_dif(re, im, n, m);
+    return DFX_SUCCESS;
+}
+
+/*!
+ *  \brief In-place prime factor FFT.
+ *
+ *  \param[in,out]  re, im - real and imaginary parts of the input, replaced by those of the spectrum
+ *  \param[in]      n      - transform length: a product of mutually prime factors from {2,3,4,5,7,8,9,16}
+ *
+ *  \returns        DFX_SUCCESS, DFX_INVARG, or DFX_NOTSUP if n cannot be factored this way
+ */
+int fft_pfa(float* re, float* im, int n)
+{
+    int ni[4], m;
+    if (re == NULL || im == NULL || n < 1) return DFX_INVARG;
+    if (n == 1) return DFX_SUCCESS;
+    if ((m = pfa_factors(n, ni)) == 0) return DFX_NOTSUP;
+    pfa_fft(re, im, n, m, ni);
+    return DFX_SUCCESS;
+}
+
+/*!
+ *  \brief In-place complex FFT of length n.
+ *
+ *  If n is a power of two, the radix-2 decimation-in-time algorithm is used; otherwise the
+ *  prime factor algorithm is tried (see fft_pfa() for the supported lengths).
+ *
+ *  \param[in,out]  re - real part of the input, replaced by the real part of the spectrum
+ *  \param[in,out]  im - imaginary part of the input, replaced by the imaginary part of the spectrum
+ *  \param[in]      n  - transform length
+ *
+ *  \returns        DFX_SUCCESS, DFX_INVARG, or DFX_NOTSUP if the length is not supported
+ */
+int fft(float* re, float* im, int n)
+{
+    if (re == NULL || im == NULL || n < 1) return DFX_INVARG;
+    if (log2_int(n) >= 0) return fft_dit(re, im, n);
+    return fft_pfa(re, im, n);
 }
 
 /* dfx_fft.c -- end of file */

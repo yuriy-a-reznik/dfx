@@ -2,18 +2,23 @@
  *  \file   dfx_dft.c
  *  \brief  DFX library: 2D Discrete Fourier Transform (DFT).
  * 
- *  This module provodes a very basic, separable, matrix multiply-based implementation of the 2D DFT transform. 
- *  Father methods for DFT computation can be found in module dfx_fft.c.
+ *  This module provides a very basic, separable, matrix multiply-based implementation of the 2D DFT transform:
+ *
+ *      F(u,v) = sum_{x=0}^{W-1} sum_{y=0}^{H-1} f(x,y) exp(-2 pi i (u x / W + v y / H)),   u = 0..W-1, v = 0..H-1,
+ *
+ *  computed as a 1D DFT of every row followed by a 1D DFT of every column of the result.
+ *  Each 1D DFT is evaluated directly from its definition using precomputed tables of
+ *  cos(2 pi k n / N) and sin(2 pi k n / N), so the cost is O(W H (W + H)).
+ *  Faster methods for DFT computation can be found in module dfx_fft.c.
  *
  *  Copyright (c) 2026 Yuriy A. Reznik
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdlib.h>
 #include "dfx.h"
@@ -22,7 +27,7 @@
  *
  * Internal functions supporting computation of 2D DFT:
  *
- *   gen_dft_coeffs()     - generate DTF coefficients
+ *   gen_dft_coeffs()     - generate DFT coefficients
  *   free_dft_coeffs()    - frees memory used by DFT coefficients
  * 
  *   dft_row()            - 1D DFT for row (real input)
@@ -32,7 +37,8 @@
 /*! 
  *  \brief Initialize arrays of transform coefficients for 2D DFT computation.
  * 
- *  \param[in,out] pC, pS - pointers to arrays of precomputed transform coefficients
+ *  \param[out]    pC, pS - pointers to variables to receive the N x N tables C[k][n] = cos(2 pi k n / N), S[k][n] = sin(2 pi k n / N)
+ *  \param[in]     N      - transform length
  * 
  *  \returns       DFX_X error code
  */
@@ -48,14 +54,16 @@ static int gen_dft_coeffs(float** pC, float** pS, int N)
 	*pC = NULL;
 	*pS = NULL;
 
-	/* allocate arays */
-	if ((C = (float*)malloc(N * N * sizeof(float))) == NULL) return DFX_NOMEM;
-	if ((S = (float*)malloc(N * N * sizeof(float))) == NULL) { free(C); return DFX_NOMEM; }
+	/* allocate arrays */
+	if ((C = (float*)malloc((size_t)N * N * sizeof(float) + 1)) == NULL) return DFX_NOMEM;
+	if ((S = (float*)malloc((size_t)N * N * sizeof(float) + 1)) == NULL) { free(C); return DFX_NOMEM; }
 
-	/* generate transform coefficients: */
+	/* generate transform coefficients; the product k*n is reduced modulo N first (the
+	 * twiddle factors are periodic), which keeps the argument of cos/sin small and accurate: */
 	for (k = 0; k < N; k++) for (n = 0; n < N; n++) {
-		C[k * N + n] = cosf((float)(2 * M_PI * k * n)/(float)N);
-		S[k * N + n] = sinf((float)(2 * M_PI * k * n)/(float)N);
+		double a = 2 * M_PI * (double)((k * n) % N) / (double)N;
+		C[k * N + n] = (float)cos(a);
+		S[k * N + n] = (float)sin(a);
 	}
 
 	/* set pointers to initialized arrays: */
@@ -79,13 +87,13 @@ static int free_dft_coeffs(float* C, float* S)
  *  \brief Apply 1D DFT across a row in an image.
  * 
  *  \param[in]  f         - pointer to a row in an input image (real) 
- *  \param[out] reZ, imZ  - pointer to a row in a temp image to contain real/imaginnary parts of the row-processed spectrum
+ *  \param[out] reZ, imZ  - pointers to a row in a temp image to contain real/imaginary parts of the row-processed spectrum
  *  \param[in]  width     - image width 
  *  \param[in]  C, S      - precomputed transform coefficients
  *
  *  \returns    DFX_X error code
  */
-static int dft_row(float* f, float* reZ, float* imZ, int width, float *C, float *S)
+static int dft_row(const float* f, float* reZ, float* imZ, int width, const float *C, const float *S)
 {
 	int k, n;
 
@@ -113,17 +121,17 @@ static int dft_row(float* f, float* reZ, float* imZ, int width, float *C, float 
 /*!
  *  \brief Apply 1D DFT across a column in an image.
  * 
- *  \param[in]  reZ, imZ  - pointer to a column in a temp image containing real/imaginnary parts of row-processed spectrum
- *  \param[out] reF, imF  - pointer to a column in an image to contain final 2D DFT spectrum
- *  \param[in]  width     - image width
- *  \param[in]  height    - image width
+ *  \param[in]  reZ, imZ  - pointers to a column in a temp image containing real/imaginary parts of row-processed spectrum
+ *  \param[out] reF, imF  - pointers to a column in an image to contain final 2D DFT spectrum
+ *  \param[in]  width     - full width of the padded planes = distance between consecutive samples of a column
+ *  \param[in]  height    - image height
  *  \param[in]  C, S      - precomputed transform coefficients
  *
  *  \returns    DFX_X error code
  */
-static int dft_column(float* reZ, float* imZ, float* reF, float* imF, int width, int height, float* C, float* S)
+static int dft_column(const float* reZ, const float* imZ, float* reF, float* imF, int width, int height, const float* C, const float* S)
 {
-	int k, n;  /* full width of a padded image */
+	int k, n;
 
 	/* check parameters: */
 	if (reZ == NULL || imZ == NULL || reF == NULL || imF == NULL || width < 0 || height < 0 || C == NULL || S == NULL)
@@ -152,20 +160,24 @@ static int dft_column(float* reZ, float* imZ, float* reF, float* imF, int width,
 /*!
  *  \brief Image pre-processing shifting 2D DFT's DC to the center.
  *
+ *  Multiplying f(x,y) by (-1)^(x+y) = exp(i pi (x + y)) shifts its spectrum by half the
+ *  image size in each direction, so that the DC term lands at (width/2, height/2).
+ *  The shift is exact when width and height are even.
+ *
  *  \param[in]      f       - input image (real)
  *  \param[out]     g       - output image (real)
- *  \param[in]      height  - image height
  *  \param[in]      width   - image width
+ *  \param[in]      height  - image height
  *  \param[in]      p       - padding parameter
  *
  *  \returns        DFX_X error code
  */
-static int dft_preprocess(float* f, float* g, int width, int height, int p)
+static int dft_preprocess(const float* f, float* g, int width, int height, int p)
 {
 	int x, y;
 
 	/* check parameters: */
-	if (f == NULL || width < 0 || height < 0 || p < 0)
+	if (f == NULL || g == NULL || width < 0 || height < 0 || p < 0)
 		return DFX_INVARG;
 
 	/* generate pre-processed image: */
@@ -182,23 +194,23 @@ static int dft_preprocess(float* f, float* g, int width, int height, int p)
 }
 
 /*!
- *  \brief Two-dimenstional Discrete Fourier Transform over an image plane
+ *  \brief Two-dimensional Discrete Fourier Transform over an image plane
  *
  *  \param[in]  f          - input image plane (real)
- *  \param[out] reF, imF   - real/imaginnary parts of Fourier spectrum of input image
- *  \param[in]  height     - image height 
+ *  \param[out] reF, imF   - real/imaginary parts of Fourier spectrum of input image (planes of the same geometry as f)
  *  \param[in]  width      - image width 
+ *  \param[in]  height     - image height 
  *  \param[in]  p          - padding parameter
- *  \param[in]  center_dc  - shift DC to the center of the 2D spectral image 
+ *  \param[in]  center_dc  - if nonzero, shift DC to the center of the 2D spectral image 
  *
  *  \returns    DFX_X error code
  */
-int dft_plane(float* f, float* reF, float* imF, int width, int height, int p, int center_dc)
+int dft_plane(const float* f, float* reF, float* imF, int width, int height, int p, int center_dc)
 {
-	float *reZ=NULL, *imZ=NULL;				/* temporary plane holding the results of row-filtering */
+	float *reZ=NULL, *imZ=NULL;				/* temporary planes holding the results of row transforms */
 	float *C_row=NULL, *S_row=NULL;			/* transform coefficients for rows */
 	float *C_col = NULL, * S_col = NULL;	/* transform coefficients for columns */
-	float *f_in;                            /* pointer to an input image to be used for transformation */
+	const float *f_in;                      /* pointer to an input image to be used for transformation */
 	
 	int x, y;
 
@@ -257,18 +269,18 @@ int dft_plane(float* f, float* reF, float* imF, int width, int height, int p, in
 	return DFX_SUCCESS;
 }
 
-/*
+/*!
  *  \brief Compute magnitude of a 2D DFT spectrum for an image. 
  *
  *  \param[in]  reF, imF  - real/imaginary parts of Fourier spectrum of input image
  *  \param[out] magF      - magnitude of the Fourier spectrum
- *  \param[in]  height    - image height
  *  \param[in]  width     - image width
+ *  \param[in]  height    - image height
  *  \param[in]  p         - padding parameter
  *
  *  \returns    DFX_X error code
-*/
-int dft_magnitude(float* reF, float* imF, float* magF, int width, int height, int p)
+ */
+int dft_magnitude(const float* reF, const float* imF, float* magF, int width, int height, int p)
 {
 	float re, im, mag;
 	int x, y;
@@ -280,7 +292,7 @@ int dft_magnitude(float* reF, float* imF, float* magF, int width, int height, in
 	/* compute magnitude: */
 	for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
 		re = reF[(y + p) * (width + 2 * p) + x + p];
-		im = reF[(y + p) * (width + 2 * p) + x + p];
+		im = imF[(y + p) * (width + 2 * p) + x + p];
 		mag = sqrtf(re*re + im*im);
 		magF[(y + p) * (width + 2 * p) + x + p] = mag;
 	}
@@ -289,18 +301,18 @@ int dft_magnitude(float* reF, float* imF, float* magF, int width, int height, in
 	return DFX_SUCCESS;
 }
 
-/*
+/*!
  *  \brief Compute phase of a 2D DFT spectrum for an image.
  *
  *  \param[in]  reF, imF  - real/imaginary parts of Fourier spectrum of input image
- *  \param[out] phaseF    - phase of the Fourier spectrum
- *  \param[in]  height    - image height
+ *  \param[out] phaseF    - phase of the Fourier spectrum, in the range (-pi, pi]
  *  \param[in]  width     - image width
+ *  \param[in]  height    - image height
  *  \param[in]  p         - padding parameter
  *
  *  \returns    DFX_X error code
-*/
-int dft_phase(float* reF, float* imF, float* phaseF, int width, int height, int p)
+ */
+int dft_phase(const float* reF, const float* imF, float* phaseF, int width, int height, int p)
 {
 	float re, im, phase;
 	int x, y;
@@ -312,7 +324,7 @@ int dft_phase(float* reF, float* imF, float* phaseF, int width, int height, int 
 	/* compute phase: */
 	for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
 		re = reF[(y + p) * (width + 2 * p) + x + p];
-		im = reF[(y + p) * (width + 2 * p) + x + p];
+		im = imF[(y + p) * (width + 2 * p) + x + p];
 		phase = atan2f(im, re);
 		phaseF[(y + p) * (width + 2 * p) + x + p] = phase;
 	}

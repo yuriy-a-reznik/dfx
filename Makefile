@@ -17,11 +17,11 @@ OBJS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 EXAMPLES_DIR := examples
 
-.PHONY: all lib examples clean install
+.PHONY: all lib examples check clean install
 
 all: lib examples
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(INCLUDE_DIR)/dfx.h | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(LIB): $(OBJS) | $(LIB_DIR)
@@ -42,6 +42,13 @@ $(LIB_DIR):
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
+# Self-tests: the FFT and DCT demos verify the fast transforms against the direct
+# definitions, and the zone-plate demo must reproduce the reference image bit for bit.
+check: all
+	$(BIN_DIR)/dfx_fft_demo
+	$(BIN_DIR)/dfx_dct_demo
+	cd $(BIN_DIR) && ./dfx_zone_plate_demo && cmp dfx-zone-plate.bmp $(abspath test/dfx-zone-plate.bmp) && echo "zone plate matches the reference image"
+
 install: lib
 	mkdir -p $(DESTDIR)$(PREFIX)/lib
 	mkdir -p $(DESTDIR)$(PREFIX)/include
@@ -51,6 +58,3 @@ install: lib
 clean:
 	# Remove only build artifacts created by this Makefile, not other project files
 	rm -rf $(OBJ_DIR) $(LIB_DIR) $(BIN_DIR)
-CC ?= cc
-CFLAGS ?= -O2 -Wall -Iinclude -std=c11
-AR ?= ar

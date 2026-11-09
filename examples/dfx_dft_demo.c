@@ -6,17 +6,21 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdio.h>
 #include "dfx.h"
 
 /*!
- *  \brief An example program demostrating how to use 2D DFT transform and related functions.
+ *  \brief An example program demonstrating how to use 2D DFT transform and related functions.
+ *
+ *  The luminance of the input image is transformed with the DC term moved to the center.
+ *  The magnitude is shown normalized by its DC value (so it fits in [0,1]) and also in a
+ *  logarithmic scale, log(1 + |F|) / log(|F(0,0)|), which makes the weak high-frequency
+ *  components visible. The phase, in (-pi, pi], is mapped linearly to [0,1].
  */
 int main(int argc, char* argv[])
 {
@@ -69,10 +73,12 @@ int main(int argc, char* argv[])
 	linear_to_srgb(Y, Y, Y, sRGB_out, width, height, 0);
 	write_bitmap("dft_demo_luminance.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
-	/* compute DFT: */
-	dft_plane(Y, reDFT, imDFT, width, height, 0, 1);
-	dft_magnitude(reDFT, imDFT, magDFT, width, height, 0);
-	dft_phase(reDFT, imDFT, phaseDFT, width, height, 0);
+	/* compute DFT (this takes a while: the direct method is O(W*H*(W+H))): */
+	if (dft_plane(Y, reDFT, imDFT, width, height, 0, 1) != DFX_SUCCESS
+	 || dft_magnitude(reDFT, imDFT, magDFT, width, height, 0) != DFX_SUCCESS
+	 || dft_phase(reDFT, imDFT, phaseDFT, width, height, 0) != DFX_SUCCESS) {
+		printf("Error: DFT computation failed\n");
+	}
 
 	/* Visualize DFT magnitude: */
 	magDC = magDFT[(height/2) * width + width / 2];

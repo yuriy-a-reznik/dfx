@@ -6,8 +6,8 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
 #include <stdio.h>
@@ -29,23 +29,24 @@ int main(int argc, char* argv[])
 	/* padding in linear form: */
 	int p = 10;
 
-	/* filter width parameters: */
-	float fc = 0.25;								
+	/* filter parameters: cutoff frequency (cycles per pixel) and half-length: */
+	float fc = 0.25f;								
 	int n = 5;
+	int err;
 
 	/* some basic checks: */
 	if (n > p) {
-		printf("Error: filter width cannot exceed padding of an image\n");
+		printf("Error: filter half-length cannot exceed padding of an image\n");
 		return 1;
 	}
-	if (fc <= 0 || fc > 1.0) {
+	if (fc <= 0 || fc > 0.5) {
 		printf("Error: incorrect value of cutoff frequency parameter\n");
 		return 1;
 	}
 
 	/* check program parameters and read sRGB image: */
 	if (argc < 2) {
-		printf("Usage: dfx_filter_image <bitmap image>\n");
+		printf("Usage: dfx_filter_demo <bitmap image>\n");
 		return 1;
 	}
 	if (read_bitmap(argv[1], &sRGB_in, &width, &height, &ppm_x, &ppm_y) != DFX_SUCCESS) {
@@ -73,20 +74,20 @@ int main(int argc, char* argv[])
 	write_bitmap("dfx_filter_original.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
 	/* apply Gaussian filter: */
-	zero_image(R_out, G_out, B_out, width, height, p);
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_GAUSS, fc);
+	if ((err = filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_GAUSS, fc)) != DFX_SUCCESS)
+		printf("filter_image(FILT_GAUSS) failed with error code %d\n", err);
 	linear_to_srgb(R_out, G_out, B_out, sRGB_out, width, height, p);
 	write_bitmap("dfx_filter_gauss.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
 	/* apply sinc filter: */
-	zero_image(R_out, G_out, B_out, width, height, p);
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_SINC, fc);
+	if ((err = filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_SINC, fc)) != DFX_SUCCESS)
+		printf("filter_image(FILT_SINC) failed with error code %d\n", err);
 	linear_to_srgb(R_out, G_out, B_out, sRGB_out, width, height, p);
 	write_bitmap("dfx_filter_sinc.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 
 	/* apply Lanczos filter: */
-	zero_image(R_out, G_out, B_out, width, height, p);
-	filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_LANCZOS, fc);
+	if ((err = filter_image(R_in, G_in, B_in, R_out, G_out, B_out, width, height, p, n, FILT_LANCZOS, fc)) != DFX_SUCCESS)
+		printf("filter_image(FILT_LANCZOS) failed with error code %d\n", err);
 	linear_to_srgb(R_out, G_out, B_out, sRGB_out, width, height, p);
 	write_bitmap("dfx_filter_lanczos.bmp", sRGB_out, width, height, ppm_x, ppm_y);
 

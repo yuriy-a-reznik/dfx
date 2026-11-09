@@ -6,11 +6,10 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,13 +24,15 @@
  * 
  *  Using formula:
  * 
- *     g(x) = 0.5 + 0.5 * sin( km * r^2 / (2*rm) ) * (0.5 + 0.5 * tanh( (rm - r) / w))
+ *     g(r) = 0.735 * (0.5 + 0.5 * sin( km * r^2 / (2*rm) ) * (0.5 + 0.5 * tanh( (rm - r) / w)))
  * 
  *   where
  *     r   - distance from the center of the image
  *     rm  - maximum radius of the zone plate pattern
- *     km  - maximum spatial frequency in the zone plate pattern
- *     w   - controls the width of the transition band
+ *     km  - maximum angular spatial frequency (radians per pixel) in the zone plate pattern, reached at r = rm:
+ *           the instantaneous frequency of the chirp is d/dr [km r^2 / (2 rm)] = km r / rm
+ *     w   - controls the width of the transition band at the rim
+ *   The factor 0.735 limits the peak linear value of the pattern.
  * 
  *  \param[in,out]  y       - image where to place the pattern;
  *  \param[in]      width   - image width in pixels;
@@ -73,17 +74,17 @@ static int generate_zone_plate(float *y, int width, int height, int p, float fc)
 }
 
 /*!
- *  \brief An example generating gray-scale gradient images, explaining the conversion between linear and sRGB spaces.
+ *  \brief An example generating the zone-plate test image.
  */
-int main()
+int main(void)
 {
 	/* assumed image geometry: */
 	int height = 480;
 	int width = 480;
-	int ppm_x = 1024;	// 96 DPI pixel density
+	int ppm_x = 1024;	/* pixel density, pixels per meter (1024 ppm = 26 dpi) */
 	int ppm_y = 1024;
 
-	/* max frequency */
+	/* max frequency at the rim of the pattern, in cycles per pixel (0.5 = Nyquist) */
 	float fc = 0.5f;
 
 	/* linear and srgb images/planes: */

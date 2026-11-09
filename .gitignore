@@ -1,2 +1,8 @@
 .vs/
 build/.vs
+build/obj/
+build/lib/
+build/bin/
+build/x64/
+build/Debug/
+build/Release/

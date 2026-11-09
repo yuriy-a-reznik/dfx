@@ -1,6 +1,6 @@
 /*!
  *  \file   dfx_color_adj_demo.c
- *  \brief  An example demonstrating color adjustement operations. 
+ *  \brief  An example demonstrating color adjustment operations. 
  *
  *  This program generates color gradient test patterns and then applies adjustments of hue, saturation, and brightness. 
  *  It can also perform these operations with a user-supplied test file as an input.
@@ -9,11 +9,10 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.02
- *  \date    March 15, 2026
+ *  \version 1.03
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdio.h>
 #include "dfx.h"
@@ -127,7 +126,7 @@ static int generate_color_saturation_gradient_image(float* R, float* G, float* B
 		/* paint red stripe: */
 		for (y = 0; y < stripe_height; y++) {
 			dy = (float)(y % stripe_height) / (stripe_height - 1);
-			L = powf(1.f - dy, gamma);										/* L = function of vertical position withn a stripe */
+			L = powf(1.f - dy, gamma);										/* L = function of vertical position within a stripe */
 			R[(p + y) * (width + 2 * p) + p + x] = L * S + L * (1 - S);
 			G[(p + y) * (width + 2 * p) + p + x] = 0 * S + L * (1 - S);
 			B[(p + y) * (width + 2 * p) + p + x] = 0 * S + L * (1 - S);
@@ -180,12 +179,50 @@ static int generate_color_saturation_gradient_image(float* R, float* G, float* B
 }
 
 /*!
+ *  \brief Report the outcome of a color adjustment.
+ *
+ *  DFX_INVRANGE is a legitimate outcome: it means that some adjusted colors fell outside of the
+ *  sRGB gamut (RGB values outside of [0,1]); such values are clipped by linear_to_srgb().
+ */
+static void report(int err, const char* what)
+{
+	if (err == DFX_INVRANGE)
+		printf("%s: some colors fell outside of the sRGB gamut (clipped on output)\n", what);
+	else if (err != DFX_SUCCESS)
+		printf("%s: failed with error code %d\n", what, err);
+}
+
+/*!
+ *  \brief Apply brightness and saturation adjustments with a given scale factor, store results in bitmap files.
+ */
+static void test_adjustment(int (*adjust)(const float*, const float*, const float*, float*, float*, float*, int, int, int, float, int),
+	const char* name, const float* R, const float* G, const float* B, float* R2, float* G2, float* B2, unsigned char* sRGB,
+	int width, int height, int p, int ppm_x, int ppm_y, float scale, const char* scale_name)
+{
+	char fn[128], what[128];
+
+	/* hard clipping: */
+	snprintf(what, sizeof(what), "%s(%g, hard)", name, scale);
+	report(adjust(R, G, B, R2, G2, B2, width, height, p, scale, 0), what);
+	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
+	snprintf(fn, sizeof(fn), "test_%s_%s_hard.bmp", scale_name, name);
+	write_bitmap(fn, sRGB, width, height, ppm_x, ppm_y);
+
+	/* soft transition: */
+	snprintf(what, sizeof(what), "%s(%g, soft)", name, scale);
+	report(adjust(R, G, B, R2, G2, B2, width, height, p, scale, 2), what);
+	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
+	snprintf(fn, sizeof(fn), "test_%s_%s_soft.bmp", scale_name, name);
+	write_bitmap(fn, sRGB, width, height, ppm_x, ppm_y);
+}
+
+/*!
  *  \brief Color operations / adjustments demo program.
  */
 int main(int argc, char* argv[])
 {
-	/* image parameters: */
-	int width = 1120, height = 630, ppm_x = 2835, ppm_y = 2835; /* 72dpi*/
+	/* image parameters (geometry of the generated test patterns; replaced by those of the input file, if given): */
+	int width = 1120, height = 630, ppm_x = 2835, ppm_y = 2835; /* 72 dpi */
 	int p = 16; /* padding parameter */
 
 	/* working images / color planes: */
@@ -193,9 +230,21 @@ int main(int argc, char* argv[])
 	float *R = NULL, *G = NULL, *B = NULL;
 	float *R2 = NULL, *G2 = NULL, *B2 = NULL;
 
-	/* color space and brightness to use in comversions to XYZ, LUV, and LAB: */
-	int colors = COLORS_SRGB;
-	float Y_white = 1.0;
+	/* hue rotation angles to test: */
+	static const int degrees[] = {15, 30, 45, 60, 75, 90, 135, 180};
+	char fn[128], what[128];
+	int i;
+
+	/* 
+	 * Read the input file first, since it determines the image geometry:
+	 */
+	if (argc >= 2) {
+		if (read_bitmap(argv[1], &sRGB_in, &width, &height, &ppm_x, &ppm_y) != DFX_SUCCESS) {
+			printf("Cannot open input file: %s\n", argv[1]);
+			printf("Only 24-bit RGB bitmap files are supported.\n");
+			return 1;
+		}
+	}
 
 	/* allocate memory: */
 	if (alloc_srgb_image(&sRGB, width, height) != DFX_SUCCESS
@@ -203,6 +252,7 @@ int main(int argc, char* argv[])
 	 || alloc_image(&R2, &G2, &B2, width, height, p) != DFX_SUCCESS) {
 		/* print error, free allocated memory & exit: */
 		printf("Error: cannot allocate memory for images\n");
+		if (sRGB_in != NULL) free_srgb_image(sRGB_in);
 		if (sRGB != NULL) free_srgb_image(sRGB);
 		if (R != NULL || G != NULL || B != NULL) free_image(R, G, B);
 		if (R2 != NULL || G2 != NULL || B2 != NULL) free_image(R2, G2, B2);
@@ -212,14 +262,8 @@ int main(int argc, char* argv[])
 	/* 
 	 * Load or generate test pattern to work with: 
 	 */
-	if (argc >= 2) {
-		/* read bitmap file: */
-		if (read_bitmap(argv[1], &sRGB_in, &width, &height, &ppm_x, &ppm_y) != DFX_SUCCESS) {
-			printf("Cannot open input file: %s\n", argv[1]);
-			printf("Only 24-bit RGB bitmap files are supported.\n");
-			return 1;
-		}
-		/* convert it to linear & visualize: */
+	if (sRGB_in != NULL) {
+		/* convert the input image to linear & visualize: */
 		srgb_to_linear(sRGB_in, R, G, B, width, height, p);
 		linear_to_srgb(R, G, B, sRGB, width, height, p);
 		write_bitmap("test_image.bmp", sRGB, width, height, ppm_x, ppm_y);
@@ -232,116 +276,35 @@ int main(int argc, char* argv[])
 	}
 
 	/*
-	 * Test brightness adjustements:
+	 * Test brightness adjustments by factors 0.5, 2, and 4, with hard and soft clipping:
 	 */
-
-	/* adjust brightness by factor of 0.5: */
-	adjust_brightness(R, G, B, R2, G2, B2, width, height, p, 0.5f, 0);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_05x_brightness_hard.bmp", sRGB, width, height, ppm_x, ppm_y);
-	/* with soft transition: */
-	adjust_brightness(R, G, B, R2, G2, B2, width, height, p, 0.5f, 2);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_05x_brightness_soft.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* adjust brightness by factor of 2x: */
-	adjust_brightness(R, G, B, R2, G2, B2, width, height, p, 2.0f, 0);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_2x_brightness_hard.bmp", sRGB, width, height, ppm_x, ppm_y);
-	/* with soft transition: */
-	adjust_brightness(R, G, B, R2, G2, B2, width, height, p, 2.0f, 2);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_2x_brightness_soft.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* adjust brightness by factor of 4x: */
-	adjust_brightness(R, G, B, R2, G2, B2, width, height, p, 4.0f, 0);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_4x_brightness_hard.bmp", sRGB, width, height, ppm_x, ppm_y);
-	/* with soft transition: */
-	adjust_brightness(R, G, B, R2, G2, B2, width, height, p, 4.0f, 2);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_4x_brightness_soft.bmp", sRGB, width, height, ppm_x, ppm_y);
+	test_adjustment(adjust_brightness, "brightness", R, G, B, R2, G2, B2, sRGB, width, height, p, ppm_x, ppm_y, 0.5f, "05x");
+	test_adjustment(adjust_brightness, "brightness", R, G, B, R2, G2, B2, sRGB, width, height, p, ppm_x, ppm_y, 2.0f, "2x");
+	test_adjustment(adjust_brightness, "brightness", R, G, B, R2, G2, B2, sRGB, width, height, p, ppm_x, ppm_y, 4.0f, "4x");
 
 	/*
-	 * Test saturation adjustements:
+	 * Test saturation adjustments:
 	 */
-	if (argc < 2) {
+	if (sRGB_in == NULL) {
 		/* generate saturation test pattern; */
 		generate_color_saturation_gradient_image(R, G, B, width, height, p);
 		linear_to_srgb(R, G, B, sRGB, width, height, p);
 		write_bitmap("color_gradient_test_image_2.bmp", sRGB, width, height, ppm_x, ppm_y);
 	}
-
-	/* adjust saturation by factor of 0.5: */
-	adjust_saturation(R, G, B, R2, G2, B2, width, height, p, 0.5f, 0);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_05x_saturation_hard.bmp", sRGB, width, height, ppm_x, ppm_y);
-	/* with soft transition: */
-	adjust_saturation(R, G, B, R2, G2, B2, width, height, p, 0.5f, 2);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_05x_saturation_soft.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* adjust saturation by factor of 2x: */
-	adjust_saturation(R, G, B, R2, G2, B2, width, height, p, 2.0f, 0);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_2x_saturation_hard.bmp", sRGB, width, height, ppm_x, ppm_y);
-	/* with soft transition: */
-	adjust_saturation(R, G, B, R2, G2, B2, width, height, p, 2.0f, 2);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_2x_saturation_soft.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* adjust saturation by factor of 4x: */
-	adjust_saturation(R, G, B, R2, G2, B2, width, height, p, 4.0f, 0);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_4x_saturation_hard.bmp", sRGB, width, height, ppm_x, ppm_y);
-	/* with soft transition: */
-	adjust_saturation(R, G, B, R2, G2, B2, width, height, p, 4.0f, 2);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_4x_saturation_soft.bmp", sRGB, width, height, ppm_x, ppm_y);
+	test_adjustment(adjust_saturation, "saturation", R, G, B, R2, G2, B2, sRGB, width, height, p, ppm_x, ppm_y, 0.5f, "05x");
+	test_adjustment(adjust_saturation, "saturation", R, G, B, R2, G2, B2, sRGB, width, height, p, ppm_x, ppm_y, 2.0f, "2x");
+	test_adjustment(adjust_saturation, "saturation", R, G, B, R2, G2, B2, sRGB, width, height, p, ppm_x, ppm_y, 4.0f, "4x");
 
 	/*
-	 * Test hue adjustements:
+	 * Test hue adjustments:
 	 */
-
-	/* +15 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI/12.f);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_15deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +30 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI / 6.f);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_30deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +45 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI / 4.f);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_45deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +60 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI / 3.f);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_60deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +75 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI * 5.f/12.f);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_75deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +90 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI / 2.f);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_90deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +135 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI*3./4.);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_135deg.bmp", sRGB, width, height, ppm_x, ppm_y);
-
-	/* +180 degrees */
-	adjust_hue(R, G, B, R2, G2, B2, width, height, p, M_PI);
-	linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
-	write_bitmap("test_hue_plus_180deg.bmp", sRGB, width, height, ppm_x, ppm_y);
+	for (i = 0; i < (int)(sizeof(degrees) / sizeof(degrees[0])); i++) {
+		snprintf(what, sizeof(what), "adjust_hue(+%d degrees)", degrees[i]);
+		report(adjust_hue(R, G, B, R2, G2, B2, width, height, p, (float)(M_PI * degrees[i] / 180.0)), what);
+		linear_to_srgb(R2, G2, B2, sRGB, width, height, p);
+		snprintf(fn, sizeof(fn), "test_hue_plus_%ddeg.bmp", degrees[i]);
+		write_bitmap(fn, sRGB, width, height, ppm_x, ppm_y);
+	}
 
 	/* free memory and exit: */
 	if (sRGB_in) free_srgb_image(sRGB_in);

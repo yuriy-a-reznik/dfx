@@ -2,16 +2,16 @@
  *  \file   dfx_gradient_demo.c
  *  \brief  An example generating gray-scale gradient images, illustrating the differences between the linear RGB and gamma-companded spaces.
  * 
- *  This example generates test images, convertes them to sRGB space an saves them as bitmap files.
- *  This example also shows that 8-bit sRGB format has some limitations. The straightforward rounding to 8-bit valies produces 
+ *  This example generates test images, converts them to sRGB space and saves them as bitmap files.
+ *  This example also shows that 8-bit sRGB format has some limitations. The straightforward rounding to 8-bit values produces 
  *  visible "banding" effects in these test images. Dithered conversion to sRGB helps to reduce the appearance of banding. 
  *
  *  Copyright (c) 2026 Yuriy A. Reznik
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
 #include <stdio.h>
@@ -62,12 +62,12 @@ static int generate_gradient(float* Y, int width, int height, int p, int gamma)
 /*!
  *  \brief DFX: Gray-scale gradient demo program.
  */
-int main()
+int main(void)
 {
 	/* assumed image geometry: */
 	int height = 4098;
 	int width = 4098;
-	int ppm_x = 1024;	// 96 DPI pixel density
+	int ppm_x = 1024;	/* pixel density, pixels per meter (1024 ppm = 26 dpi) */
 	int ppm_y = 1024;
 
 	/* linear and srgb images/planes: */

@@ -12,7 +12,7 @@ BINS := $(patsubst %.c,$(BUILD_BIN_DIR)/%,$(EXS))
 
 all: $(BINS)
 
-$(BUILD_BIN_DIR)/%: %.c | $(BUILD_BIN_DIR)
+$(BUILD_BIN_DIR)/%: %.c $(LIB) ../include/dfx.h | $(BUILD_BIN_DIR)
 	$(CC) $(CFLAGS) $< $(LIB) $(LIBS) -o $@
 
 $(BUILD_BIN_DIR):

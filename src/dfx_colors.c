@@ -10,11 +10,10 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.02
- *  \date    March 15, 2026
+ *  \version 1.03
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <float.h>	
 #include <stdlib.h>
@@ -28,6 +27,9 @@
   *    uv_prim[]          - table of uv primary colors of RGB color systems
   *    gen_uv_prim()      - function that generates the uv_prim[] table
   */
+
+/* Tolerance for the [0,1] range check of linear RGB values (about 1/30 of the smallest 8-bit sRGB step in linear light): */
+#define RGB_RANGE_TOLERANCE  1e-5f
 
 /* CIE 1931 (x,y) coordinates */
 typedef struct { float x, y; } xy_t;
@@ -54,7 +56,7 @@ static int uv_prim_generated = 0;
 /*!
  *  \brief Generate a table of uv primary colors.
  */
-static void gen_uv_prim()
+static void gen_uv_prim(void)
 {
 	float x, y;
 	int i, j;
@@ -67,12 +69,12 @@ static void gen_uv_prim()
 			/* pull (x,y) pair: */
 			x = xy_prim[i][j].x;
 			y = xy_prim[i][j].y;
-			/* convert (x,y) to (u',v')s: */
+			/* convert (x,y) to (u',v') (CIE 1976 UCS: u' = 4X/(X+15Y+3Z), v' = 9Y/(X+15Y+3Z), with X=x/y, Y=1, Z=(1-x-y)/y): */
 			uv_prim[i][j].u = 4.f * x / (-2.f * x + 12.f * y + 3.f);
 			uv_prim[i][j].v = 9.f * y / (-2.f * x + 12.f * y + 3.f);
 		}
+		uv_prim_generated = 1;
 	}
-	uv_prim_generated++;
 }
 
 /********************  
@@ -80,36 +82,18 @@ static void gen_uv_prim()
  * 3x3 matrix operations:
  * 
  *   matrix_vector_multiply()
- *   matrix_matrix_multiply()
  *   matrix_inverse()
  */
 
-/*! 3x3 matrix-vector multiply */
-static void matrix_vector_multiply(float A[][3], float b[], float c[])
+/*! 3x3 matrix-vector multiply: c = A b */
+static void matrix_vector_multiply(float A[][3], const float b[], float c[])
 {
 	c[0] = A[0][0] * b[0] + A[0][1] * b[1] + A[0][2] * b[2];
 	c[1] = A[1][0] * b[0] + A[1][1] * b[1] + A[1][2] * b[2];
 	c[2] = A[2][0] * b[0] + A[2][1] * b[1] + A[2][2] * b[2];
 }
 
-/*! 3x3 matrix multiply */
-static void matrix_matrix_multiply(float A[][3], float B[][3], float C[][3])
-{
-	/* j=0 */
-	C[0][0] = A[0][0] * B[0][0] + A[0][1] * B[1][0] + A[0][2] * B[2][0];
-	C[0][1] = A[0][0] * B[0][1] + A[0][1] * B[1][1] + A[0][2] * B[2][1];
-	C[0][2] = A[0][0] * B[0][2] + A[0][1] * B[1][2] + A[0][2] * B[2][2];
-	/* j=1 */
-	C[1][0] = A[1][0] * B[0][0] + A[1][1] * B[1][0] + A[1][2] * B[2][0];
-	C[1][1] = A[1][0] * B[0][1] + A[1][1] * B[1][1] + A[1][2] * B[2][1];
-	C[1][2] = A[1][0] * B[0][2] + A[1][1] * B[1][2] + A[1][2] * B[2][2];
-	/* j=2 */
-	C[2][0] = A[2][0] * B[0][0] + A[2][1] * B[1][0] + A[2][2] * B[2][0];
-	C[2][1] = A[2][0] * B[0][1] + A[2][1] * B[1][1] + A[2][2] * B[2][1];
-	C[2][2] = A[2][0] * B[0][2] + A[2][1] * B[1][2] + A[2][2] * B[2][2];
-}
-
-/*! 3x3 matrix inversion */
+/*! 3x3 matrix inversion by cofactors: W = M^-1 */
 static int matrix_inverse(float M[][3], float W[][3])
 {
 	float a, b, c, d, e, f, g, h, i;
@@ -150,13 +134,17 @@ static int matrix_inverse(float M[][3], float W[][3])
 /*!
  *  \brief Compute luminance values for primary colors.
  *
+ *  The RGB->XYZ matrix of a color system has columns proportional to the XYZ coordinates
+ *  of its primaries. The proportionality factors Y_r, Y_g, Y_b are found from the
+ *  requirement that RGB = (1,1,1) maps to the white point with luminance Y_white.
+ *
  *  \param[in]  p        - xy primaries + white point 
  *  \param[in]  Y_white  - luminance of white point
  *  \param[out] Y        - luminance values of primary colors in XYZ space
  *
- *  \return 0 if success, !0 error.
+ *  \return DFX_X error code
  */
-static int compute_primary_Ys(xy_t* p, float Y_white, float* Y)
+static int compute_primary_Ys(const xy_t* p, float Y_white, float* Y)
 {
 	float M[3][3] = {0}, M_inv[3][3] = { 0 }, W[3] = { 0 };
 	int i;
@@ -192,7 +180,7 @@ static int compute_primary_Ys(xy_t* p, float Y_white, float* Y)
  *
  *  \returns    DFX_X error code
  */
-static int compute_rgb_to_xyz_matrix(xy_t* p, float Y_white, float rgb_to_xyz[][3])
+static int compute_rgb_to_xyz_matrix(const xy_t* p, float Y_white, float rgb_to_xyz[][3])
 {
 	float Y[3] = {0};
 	int i;
@@ -230,18 +218,18 @@ static int compute_rgb_to_xyz_matrix(xy_t* p, float Y_white, float rgb_to_xyz[][
    *  \param[in]      width    - image width in pixels
    *  \param[in]      height   - image height in pixels
    *  \param[in]      p        - padding parameter
-   *  \param[in,out]  p_X_min  - pointer to a variable to store minimum sample value
-   *  \param[in,out]  p_X_max  - pointer to a variable to store maximum sample value
+   *  \param[out]     p_X_min  - pointer to a variable to store minimum sample value
+   *  \param[out]     p_X_max  - pointer to a variable to store maximum sample value
    *
    *  \returns        DFX_X error code
    */
-static int range(float* X, int width, int height, int p, float* p_X_min, float* p_X_max)
+static int range(const float* X, int width, int height, int p, float* p_X_min, float* p_X_max)
 {
 	int x, y;
 	float v, v_min, v_max;
 
 	/* check parameters: */
-	if (X == NULL || p_X_max == NULL || height < 0 || width < 0 || p < 0)
+	if (X == NULL || p_X_min == NULL || p_X_max == NULL || height < 0 || width < 0 || p < 0)
 		return DFX_INVARG;
 
 	/* compute max sample value: */
@@ -266,12 +254,16 @@ static int range(float* X, int width, int height, int p, float* p_X_min, float* 
  *  Such gains are always normalized to the maximum range that can be stored in a particular format. 
  *  E.g. in 8-bit/channel sRGB bitmaps, the maximum value is 255. 
  *
- *  When we convert to linear RGB, we map then to [0,1] range. 
- *  We expect that proper filering and adjustment operations will also keep then in the same rance. 
+ *  When we convert to linear RGB, we map them to [0,1] range. 
+ *  We expect that proper filtering and adjustment operations will also keep them in the same range
+ *  (filters with negative taps may overshoot slightly; use clip_image() in that case). 
  * 
  *  This function checks this range for cases when we are about to convert RGB images to 
  *  the XYZ space. If RGB values are outside of [0,1] range, such conversion may not be correct, 
  *  and the results may be meaningless.
+ *
+ *  A small tolerance (RGB_RANGE_TOLERANCE, well below one 8-bit quantization step) is allowed,
+ *  so that rounding errors of round trips through XYZ and L*u*v* are not reported as range errors.
  *
  *  \param[in]   R, G, B  - image planes
  *  \param[in]   width    - image width in pixels
@@ -282,7 +274,7 @@ static int range(float* X, int width, int height, int p, float* p_X_min, float* 
  *               DFX_INVRANGE if any of the RGB planes contains values outside of [0,1] range, or 
  *               DFX_INVARG if any of the parameters is invalid.
  */
-static int check_rgb_range(float* R, float* G, float* B, int width, int height, int p)
+static int check_rgb_range(const float* R, const float* G, const float* B, int width, int height, int p)
 { 
 	float R_min, R_max, G_min, G_max, B_min, B_max;
 
@@ -296,30 +288,30 @@ static int check_rgb_range(float* R, float* G, float* B, int width, int height, 
 	if (range(B, width, height, p, &B_min, &B_max) != DFX_SUCCESS) return DFX_INVARG;
 
 	/* check ranges: */
-	if (R_min < 0.f || R_max > 1.0f) return DFX_INVRANGE;
-	if (G_min < 0.f || G_max > 1.0f) return DFX_INVRANGE;
-	if (B_min < 0.f || B_max > 1.0f) return DFX_INVRANGE;
+	if (R_min < -RGB_RANGE_TOLERANCE || R_max > 1.0f + RGB_RANGE_TOLERANCE) return DFX_INVRANGE;
+	if (G_min < -RGB_RANGE_TOLERANCE || G_max > 1.0f + RGB_RANGE_TOLERANCE) return DFX_INVRANGE;
+	if (B_min < -RGB_RANGE_TOLERANCE || B_max > 1.0f + RGB_RANGE_TOLERANCE) return DFX_INVRANGE;
 
 	return DFX_SUCCESS;
 }
 
 /*!
- *  \brief Linear RGB to XYZ covnversion.
+ *  \brief Linear RGB to XYZ conversion.
  * 
  *  Input RGB values are assumed to be limited to [0,1] range.
  *  Parameter Y_white defines the peak luminance to assign to the image in the XYZ space.
  *
  *  \param[in]  R, G, B    - R,G,B channels in input linear RGB image
  *  \param[out] X, Y, Z    - X,Y,Z channels in XYZ image
- *  \param[in]  height     - image height
  *  \param[in]  width      - image width
+ *  \param[in]  height     - image height
  *  \param[in]  p          - padding parameter
  *  \param[in]  colors     - CIE 1931 xy primaries + white point to use (see COLORS_* enum)
  *  \param[in]  Y_white    - luminance of white point
  * 
  *  \returns    DFX_X error code
  */
-int linear_rgb_to_xyz(float* R, float* G, float* B, float* X, float* Y, float* Z, int width, int height, int p, int colors, float Y_white)
+int linear_rgb_to_xyz(const float* R, const float* G, const float* B, float* X, float* Y, float* Z, int width, int height, int p, int colors, float Y_white)
 { 
 	float rgb_to_xyz[3][3] = {0}, rgb[3] = { 0 }, xyz[3] = { 0 };
 	int x, y;
@@ -351,13 +343,17 @@ int linear_rgb_to_xyz(float* R, float* G, float* B, float* X, float* Y, float* Z
 		Z[(p + y) * (width + 2 * p) + p + x] = xyz[2];
 	}
  
-	return DFX_SUCCESS;
+	/* fill the padding of the output planes & exit: */
+	return pad_image(X, Y, Z, width, height, p, PAD_REPLICATE);
 }
 
 /*!
- *  \brief XYZ to linear RGB covnversion.
+ *  \brief XYZ to linear RGB conversion.
+ *
+ *  The output is produced for all pixels; DFX_INVRANGE is returned if any of the resulting
+ *  RGB values are outside of the [0,1] range, i.e. the color is outside of the RGB gamut.
  */
-int xyz_to_linear_rgb(float* X, float* Y, float* Z, float* R, float* G, float* B, int width, int height, int p, int colors, float Y_white)
+int xyz_to_linear_rgb(const float* X, const float* Y, const float* Z, float* R, float* G, float* B, int width, int height, int p, int colors, float Y_white)
 {
 	float rgb_to_xyz[3][3] = {0}, xyz_to_rgb[3][3] = { 0 }, rgb[3] = { 0 }, xyz[3] = { 0 };
 	int x, y;
@@ -389,35 +385,39 @@ int xyz_to_linear_rgb(float* X, float* Y, float* Z, float* R, float* G, float* B
 		B[(p + y) * (width + 2 * p) + p + x] = rgb[2];
 	}
 
+	/* fill the padding of the output planes: */
+	if ((x = pad_image(R, G, B, width, height, p, PAD_REPLICATE)) != DFX_SUCCESS) return x;
+
 	/* check the range of RGB values & exit: */
 	return check_rgb_range(R, G, B, width, height, p);
 }
 
 /**************
  *
- *  Limunance (XYZ Y-channel)-related functions:
+ *  Luminance (XYZ Y-channel)-related functions:
  *
  *   linear_rgb_to_luminance()
  *   linear_to_luminance()
- *	 luminance_to_grayscale_rgb()
+ *   luminance_to_grayscale_image()
  */
 
  /*!
   *  \brief Extracts luminance (XYZ's Y channel) from linear-space RGB image.
   *
-  *  Conversion to luminance is accomplished by assuming that RGB space uses BT.709 primaries with D65 white.
+  *  The luminance is the middle row of the RGB->XYZ matrix applied to (R,G,B); for sRGB primaries
+  *  and D65 white this is Y = 0.2126 R + 0.7152 G + 0.0722 B (times Y_white).
   *
   *  \param[in]  R, G, B  - pointers to linear R, G, and B channels
-  *  \param[out] Y        - pointer to an luminance channel
-  *  \param[in]  height   - image height
+  *  \param[out] Y        - pointer to a luminance plane
   *  \param[in]  width    - image width
-  *  \param[in]  p        - padding boundary to add to the linear image
+  *  \param[in]  height   - image height
+  *  \param[in]  p        - padding parameter
   *  \param[in]  colors   - CIE 1931 xy primaries + white point to use (see COLORS_* enum)
   *  \param[in]  Y_white  - luminance of white point
   *
   *  \returns    DFX_X error code
   */
-int linear_rgb_to_luminance(float* R, float* G, float* B, float* Y, int width, int height, int p, int colors, float Y_white)
+int linear_rgb_to_luminance(const float* R, const float* G, const float* B, float* Y, int width, int height, int p, int colors, float Y_white)
 {
 	float rgb_to_xyz[3][3] = { 0 }, r, g, b, xyz_y;
 	int x, y;
@@ -446,13 +446,14 @@ int linear_rgb_to_luminance(float* R, float* G, float* B, float* Y, int width, i
 		Y[(p + y) * (width + 2 * p) + p + x] = xyz_y;
 	}
 
-	return DFX_SUCCESS;
+	/* fill the padding of the output plane & exit: */
+	return pad_plane(Y, width, height, p, PAD_REPLICATE);
 }
 
-/*
- * Simplified version, assuming that input is an sRGB-converted image, and white Y=1.
+/*!
+ *  \brief Simplified version of linear_rgb_to_luminance(), assuming that the input is an sRGB-converted image, and white Y=1.
  */
-int linear_to_luminance(float* R, float* G, float* B, float* Y, int width, int height, int p)
+int linear_to_luminance(const float* R, const float* G, const float* B, float* Y, int width, int height, int p)
 {
 	return linear_rgb_to_luminance(R, G, B, Y, width, height, p, COLORS_SRGB, 1.0f);
 }
@@ -460,24 +461,28 @@ int linear_to_luminance(float* R, float* G, float* B, float* Y, int width, int h
 /*!
   *  \brief Converts luminance to linear-space gray-scale RGB image.
   *
-  *  \param[in]  Y        - pointer to an luminance channel
+  *  A gray color has R = G = B, and for sRGB primaries its luminance equals that common value
+  *  (the middle row of the RGB->XYZ matrix sums to 1). The luminance plane is therefore expected
+  *  to be normalized to Y_white = 1.
+  *
+  *  \param[in]  Y        - pointer to a luminance plane
   *  \param[out] R, G, B  - pointers to linear R, G, and B channels
-  *  \param[in]  height   - image height
   *  \param[in]  width    - image width
-  *  \param[in]  p        - padding boundary to add to the linear image
+  *  \param[in]  height   - image height
+  *  \param[in]  p        - padding parameter
   */
-int luminance_to_grayscale_image(float* Y, float* R, float* G, float* B, int width, int height, int p)
+int luminance_to_grayscale_image(const float* Y, float* R, float* G, float* B, int width, int height, int p)
 {
+	int err;
+
 	/* check parameters: */
 	if (Y == NULL || R == NULL || G == NULL || B == NULL || height < 0 || width < 0 || p < 0)
 		return DFX_INVARG;
 
 	/* replicate luminance values to all 3 channels: */
-	copy_plane(Y, R, width, height, p);
-	copy_plane(Y, G, width, height, p);
-	copy_plane(Y, B, width, height, p);
-
-	return DFX_SUCCESS;
+	if ((err = copy_plane(Y, R, width, height, p)) != DFX_SUCCESS) return err;
+	if ((err = copy_plane(Y, G, width, height, p)) != DFX_SUCCESS) return err;
+	return copy_plane(Y, B, width, height, p);
 }
 
 /*****************
@@ -485,21 +490,27 @@ int luminance_to_grayscale_image(float* Y, float* R, float* G, float* B, int wid
  *  Conversions between XYZ and CIE L*u*v* and CIE L*a*b* color spaces:
  *
  *   cie_f()      - compander function 
- *   cie_f_inv()  - inverse compander function
- *   xyz_to_lyv() - XYZ to L*u*v* conversion
- *   lyv_to_xyz() - L*u*v* to XYZ conversion
+ *   cie_f_inv()  - inverse compander function, parameterized by L*
+ *   cie_f_inv_t()- inverse compander function
+ *   xyz_to_luv() - XYZ to L*u*v* conversion
+ *   luv_to_xyz() - L*u*v* to XYZ conversion
  *   xyz_to_lab() - XYZ to L*a*b* conversion
  *   lab_to_xyz() - L*a*b* to XYZ conversion
  *
  *  Notes: These 1976 CIE standards have been recently revised, and their formulas have been updated.
  *  The old formulae listed in the books and many online sources are no longer correct.
  *  The current standards are:
- *    ISO/CIE 11664‑4:2019 - CIE L*a*b* color space
- *    ISO/CIE 11664‑5:2024 - CIE L*u*v* color space
+ *    ISO/CIE 11664-4:2019 - CIE L*a*b* color space
+ *    ISO/CIE 11664-5:2024 - CIE L*u*v* color space
  */
 
 /*!
- *  \brief Compander used in computation of both L*a*b* and L*u*v* color spaces.
+ *  \brief Compander used in computation of both L*a*b* and L*u*v* color spaces:
+ *
+ *      f(t) = t^(1/3)                  for t > (6/29)^3,
+ *      f(t) = (841/108) t + 4/29       otherwise,
+ *
+ *  so that f is continuous with a continuous derivative at t = (6/29)^3 = 0.008856.
  */
 static float cie_f(float y)
 {
@@ -507,7 +518,7 @@ static float cie_f(float y)
 	const double scale = 841. / 108., offs = 4./29.; 
 	double f;
 
-	/* conversion formula (ISO/CIE 11664‑5:2024): */
+	/* conversion formula (ISO/CIE 11664-5:2024): */
 	if (y > y_lim)  
 		f = pow(y, 1. / 3.);    /* cubic root branch */
 	else
@@ -542,9 +553,29 @@ static float cie_f_inv(float L_star)
 }
 
 /*!
+ *  \brief Inverse compander: finds t such that cie_f(t) = f.
+ *
+ *      t = f^3                         for f > 6/29,
+ *      t = (108/841) (f - 4/29)        otherwise.
+ */
+static float cie_f_inv_t(float f)
+{
+	const double f_lim = 6. / 29.;
+	const double scale_inv = 108. / 841., offs = 4. / 29.;
+	double t;
+
+	if (f > f_lim)
+		t = pow(f, 3.);
+	else
+		t = scale_inv * (f - offs);
+
+	return (float)t;
+}
+
+/*!
  *  \brief XYZ to CIE L*u*v* color space conversion.
  * 
- *   This implementation follows the algorithm defined by ISO/CIE 11664‑5:2024 standard. 
+ *   This implementation follows the algorithm defined by ISO/CIE 11664-5:2024 standard. 
  *   The division by zero in X,Y,Z -> 0 region is avoided by forcing (x,y) and (u',v') coordinates 
  *   of such colors to white. 
  * 
@@ -558,7 +589,7 @@ static float cie_f_inv(float L_star)
  *
  *  \returns    DFX_SUCCESS if success, error code otherwise
  */
-int xyz_to_lyv(float* X, float* Y, float* Z, float* L, float* u, float* v, int width, int height, int p, int colors, float Y_white)
+int xyz_to_luv(const float* X, const float* Y, const float* Z, float* L, float* u, float* v, int width, int height, int p, int colors, float Y_white)
 {
 	float X_in, Y_in, Z_in, u_norm, u_prime, v_prime, L_star, u_star, v_star;
 	float u_prime_white, v_prime_white;
@@ -603,19 +634,30 @@ int xyz_to_lyv(float* X, float* Y, float* Z, float* L, float* u, float* v, int w
 		v[(p + y) * (width + 2 * p) + p + x] = v_star;
 	}
 
-	return DFX_SUCCESS;
+	/* fill the padding of the output planes & exit: */
+	return pad_image(L, u, v, width, height, p, PAD_REPLICATE);
 }
 
 /*!
- *  \brief CIE L*u*v* to XYZ covnversion.
+ *  \brief CIE L*u*v* to XYZ conversion.
  *  
- *   This function implements the inverse conversion (ISO/CIE 11664‑5:2024, Annex A).
+ *   This function implements the inverse conversion (ISO/CIE 11664-5:2024, Annex A).
  *   The division by zero in X,Y,Z -> 0 region is avoided by forcing (x,y) and (u',v') coordinates 
  *   of such colors to white. 
  * 
  *   The function fails with DFX_INVRANGE error if (x,y)s of the reconstruction point to non-existent colors.
+ *
+ *  \param[in]  L, u, v    - L*, u*, and v* channels in CIE L*u*v* image
+ *  \param[out] X, Y, Z    - X,Y,Z channels in XYZ image
+ *  \param[in]  width      - image width
+ *  \param[in]  height     - image height
+ *  \param[in]  p          - padding parameter
+ *  \param[in]  colors     - CIE 1931 xy primaries + white point to use (see COLORS_* enum)
+ *  \param[in]  Y_white    - luminance of white point
+ *
+ *  \returns    DFX_SUCCESS if success, error code otherwise
  */
-int lyv_to_xyz(float* L, float* u, float* v, float* X, float* Y, float* Z, int width, int height, int p, int colors, float Y_white)
+int luv_to_xyz(const float* L, const float* u, const float* v, float* X, float* Y, float* Z, int width, int height, int p, int colors, float Y_white)
 {
 	float L_star, u_star, v_star;
 	float X_out, Y_out, Z_out, x_out, y_out, u_prime, v_prime;
@@ -666,35 +708,112 @@ int lyv_to_xyz(float* L, float* u, float* v, float* X, float* Y, float* Z, int w
 		Z[(p + y) * (width + 2 * p) + p + x] = Z_out;
 	}
 
-	return DFX_SUCCESS;
+	/* fill the padding of the output planes & exit: */
+	return pad_image(X, Y, Z, width, height, p, PAD_REPLICATE);
 }
 
 /*!
- *  \brief XYZ to CIE L*a*b* color space covnversion function:
+ *  \brief XYZ to CIE L*a*b* color space conversion.
+ *
+ *   This implementation follows ISO/CIE 11664-4:2019:
+ *
+ *      L* = 116 f(Y/Y_n) - 16,
+ *      a* = 500 [f(X/X_n) - f(Y/Y_n)],
+ *      b* = 200 [f(Y/Y_n) - f(Z/Z_n)],
+ *
+ *   where (X_n, Y_n, Z_n) are the tristimulus values of the white point of the selected color
+ *   system scaled to Y_n = Y_white, and f is the compander cie_f().
  *
  *  \param[in]  X, Y, Z    - X,Y,Z channels in XYZ image
  *  \param[out] L, a, b    - L*, a*, and b* channels in CIE L*a*b* image
- *  \param[in]  height     - image height
  *  \param[in]  width      - image width
+ *  \param[in]  height     - image height
  *  \param[in]  p          - padding parameter
  *  \param[in]  colors     - CIE 1931 xy primaries + white point to use (see COLORS_* enum)
  *  \param[in]  Y_white    - luminance of white point
  *
  *  \returns    DFX_SUCCESS if success, error code otherwise
  */
-int xyz_to_lab(float* R, float* G, float* B, float* L, float* a, float* b, int width, int height, int p, int colors, float Y_white)
+int xyz_to_lab(const float* X, const float* Y, const float* Z, float* L, float* a, float* b, int width, int height, int p, int colors, float Y_white)
 {
-	/* to be implemented ... */
-	return DFX_NOTSUP;
+	float X_white, Z_white, f_x, f_y, f_z;
+	int x, y;
+
+	/* check parameters: */
+	if (X == NULL || Y == NULL || Z == NULL) return DFX_INVARG;
+	if (L == NULL || a == NULL || b == NULL) return DFX_INVARG;
+	if (height < 0 || width < 0 || p < 0) return DFX_INVARG;
+	if (colors < 0 || colors >= N_COLORS) return DFX_INVARG;
+	if (Y_white <= 0.f) return DFX_INVARG;
+
+	/* XYZ coordinates of the white point: */
+	X_white = Y_white * xy_prim[colors][3].x / xy_prim[colors][3].y;
+	Z_white = Y_white * (1.f - xy_prim[colors][3].x - xy_prim[colors][3].y) / xy_prim[colors][3].y;
+
+	/* perform the conversion: */
+	for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
+		/* compand normalized tristimulus values: */
+		f_x = cie_f(X[(p + y) * (width + 2 * p) + p + x] / X_white);
+		f_y = cie_f(Y[(p + y) * (width + 2 * p) + p + x] / Y_white);
+		f_z = cie_f(Z[(p + y) * (width + 2 * p) + p + x] / Z_white);
+		/* store L*, a*, b*: */
+		L[(p + y) * (width + 2 * p) + p + x] = 116.f * f_y - 16.f;
+		a[(p + y) * (width + 2 * p) + p + x] = 500.f * (f_x - f_y);
+		b[(p + y) * (width + 2 * p) + p + x] = 200.f * (f_y - f_z);
+	}
+
+	/* fill the padding of the output planes & exit: */
+	return pad_image(L, a, b, width, height, p, PAD_REPLICATE);
 }
 
 /*!
- *  \brief CIE L*a*b* to XYZ covnversion.
+ *  \brief CIE L*a*b* to XYZ conversion.
+ *
+ *   Inverse of xyz_to_lab() (ISO/CIE 11664-4:2019, Annex A):
+ *
+ *      f_y = (L* + 16) / 116,   f_x = f_y + a* / 500,   f_z = f_y - b* / 200,
+ *      X = X_n f^-1(f_x),   Y = Y_n f^-1(f_y),   Z = Z_n f^-1(f_z).
+ *
+ *  \param[in]  L, a, b    - L*, a*, and b* channels in CIE L*a*b* image
+ *  \param[out] X, Y, Z    - X,Y,Z channels in XYZ image
+ *  \param[in]  width      - image width
+ *  \param[in]  height     - image height
+ *  \param[in]  p          - padding parameter
+ *  \param[in]  colors     - CIE 1931 xy primaries + white point to use (see COLORS_* enum)
+ *  \param[in]  Y_white    - luminance of white point
+ *
+ *  \returns    DFX_SUCCESS if success, error code otherwise
  */
-int lab_to_xyz(float* L, float* a, float* b, float* X, float* Y, float* Z, int width, int height, int p, int colors, float Y_white)
+int lab_to_xyz(const float* L, const float* a, const float* b, float* X, float* Y, float* Z, int width, int height, int p, int colors, float Y_white)
 {
-	/* to be implemented ... */
-	return DFX_NOTSUP;
+	float X_white, Z_white, f_x, f_y, f_z;
+	int x, y;
+
+	/* check parameters: */
+	if (X == NULL || Y == NULL || Z == NULL) return DFX_INVARG;
+	if (L == NULL || a == NULL || b == NULL) return DFX_INVARG;
+	if (height < 0 || width < 0 || p < 0) return DFX_INVARG;
+	if (colors < 0 || colors >= N_COLORS) return DFX_INVARG;
+	if (Y_white <= 0.f) return DFX_INVARG;
+
+	/* XYZ coordinates of the white point: */
+	X_white = Y_white * xy_prim[colors][3].x / xy_prim[colors][3].y;
+	Z_white = Y_white * (1.f - xy_prim[colors][3].x - xy_prim[colors][3].y) / xy_prim[colors][3].y;
+
+	/* perform the conversion: */
+	for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
+		/* recover companded values: */
+		f_y = (L[(p + y) * (width + 2 * p) + p + x] + 16.f) / 116.f;
+		f_x = f_y + a[(p + y) * (width + 2 * p) + p + x] / 500.f;
+		f_z = f_y - b[(p + y) * (width + 2 * p) + p + x] / 200.f;
+		/* invert the compander and scale by the white point: */
+		X[(p + y) * (width + 2 * p) + p + x] = X_white * cie_f_inv_t(f_x);
+		Y[(p + y) * (width + 2 * p) + p + x] = Y_white * cie_f_inv_t(f_y);
+		Z[(p + y) * (width + 2 * p) + p + x] = Z_white * cie_f_inv_t(f_z);
+	}
+
+	/* fill the padding of the output planes & exit: */
+	return pad_image(X, Y, Z, width, height, p, PAD_REPLICATE);
 }
 
 /***************
@@ -716,7 +835,7 @@ int lab_to_xyz(float* L, float* a, float* b, float* X, float* Y, float* Z, int w
   * 
   *     f(x) = (max^(-k) + (alpha * x)^(-k) )^(-1/k)
   * 
-  *  When k=0, we repace it by hard clipping:
+  *  When k=0, we replace it by hard clipping:
   * 
   *     f(x) = min(alpha * x, max) 
   *
@@ -748,7 +867,7 @@ static float gain_sat(float x, float alpha, float max, int k)
 /*!
  *  \brief Compute L*u*v* color saturation and a scale that is needed to map this color to the RGB gamut boundary.
  *
- *  The input point maybe inside or outside of the RGB gamut.
+ *  The input point may be inside or outside of the RGB gamut.
  *  Scale < 1 will indicate that it will need to be desaturated to be brought back to gamut.
  *  Scale > 1 will indicate that there is still some gap between this point and the gamut boundary.
  *  For near black or white points this function returns saturation 0 and scale 1.
@@ -770,7 +889,7 @@ static int luv_sat_scale(float L_star, float u_star, float v_star, float* p_sat,
 
 	/* check parameters: */
 	if (p_sat == NULL || p_scale == NULL) return DFX_INVARG;
-	if (colors < 0 || colors > N_COLORS) return DFX_INVARG;
+	if (colors < 0 || colors >= N_COLORS) return DFX_INVARG;
 
 	/* are we near black? */
 	if (L_star < 1e-4) {
@@ -793,7 +912,7 @@ static int luv_sat_scale(float L_star, float u_star, float v_star, float* p_sat,
 	}
 
 	/* 
-	 * Scan boundaries of am RGB triangle, and find the smallest positive 
+	 * Scan boundaries of the RGB triangle, and find the smallest positive 
 	 * scale that needs to be applied to a vector from white to our input point (x) 
 	 * such that it touches one of those boundaries. 
 	 */
@@ -838,20 +957,21 @@ static int luv_sat_scale(float L_star, float u_star, float v_star, float* p_sat,
  *  \brief Brightness adjustment function.
  * 
  *  Everything is done in CIE L*u*v* space for the sake of conceptual simplicity. 
- *  Brightness-scaled L^* channel values are companded by gain_sat(function). This is a non-linear operation. 
- *  We then compute the effective scale factor that become realized in L^* channel and apply to u* and v*. 
+ *  Brightness-scaled L* channel values are companded by the gain_sat() function. This is a non-linear operation. 
+ *  We then compute the effective scale factor that became realized in the L* channel and apply it to u* and v*,
+ *  which keeps the chromaticity (u',v') of each pixel unchanged (since u* = 13 L* (u' - u'_n)). 
  * 
  *  \param[in]  R_in, G_in, B_in     - input linear RGB image
  *  \param[out] R_out, G_out, B_out  - output RGB image
- *  \param[in]  height               - image height
  *  \param[in]  width                - image width
+ *  \param[in]  height               - image height
  *  \param[in]  p                    - padding parameter
- *  \param[in]  brightness           - brightness scale adjustment parameter (0..10)
+ *  \param[in]  brightness           - brightness scale adjustment parameter (0..4)
  *  \param[in]  k                    - clipping shape parameter (0 - hard clipping, 1+ - use generalized harmonic mean compander)
  *
- *  \returns    DFX_SUCCESS if success, error code otherwise
+ *  \returns    DFX_SUCCESS if success, error code otherwise (DFX_INVRANGE if some colors fall outside of the RGB gamut)
  */
-int adjust_brightness(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out, float* B_out, int width, int height, int p, float brightness, int k)
+int adjust_brightness(const float* R_in, const float* G_in, const float* B_in, float* R_out, float* G_out, float* B_out, int width, int height, int p, float brightness, int k)
 {
 	/* local constants: */
 	const int colors = COLORS_SRGB;			/* input/output color space */
@@ -875,7 +995,7 @@ int adjust_brightness(float* R_in, float* G_in, float* B_in, float* R_out, float
 
 	/* convert RGB image to XYZ and then Luv: */
 	if ((err = linear_rgb_to_xyz(R_in, G_in, B_in, X, Y, Z, width, height, p, colors, Y_white)) == DFX_SUCCESS
-	 && (err = xyz_to_lyv(X, Y, Z, L, u, v, width, height, p, colors, Y_white)) == DFX_SUCCESS) {
+	 && (err = xyz_to_luv(X, Y, Z, L, u, v, width, height, p, colors, Y_white)) == DFX_SUCCESS) {
 
 		/* perform brightness adjustment: */
 		for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
@@ -898,7 +1018,7 @@ int adjust_brightness(float* R_in, float* G_in, float* B_in, float* R_out, float
 		}
 
 		/* convert Luv image back to XYZ and then RGB: */
-		err = lyv_to_xyz(L, u, v, X, Y, Z, width, height, p, colors, Y_white);
+		err = luv_to_xyz(L, u, v, X, Y, Z, width, height, p, colors, Y_white);
 		if (err == DFX_SUCCESS)
 			err = xyz_to_linear_rgb(X, Y, Z, R_out, G_out, B_out, width, height, p, colors, Y_white);
 	}
@@ -919,15 +1039,15 @@ int adjust_brightness(float* R_in, float* G_in, float* B_in, float* R_out, float
  * 
  *  \param[in]  R_in, G_in, B_in     - input linear RGB image
  *  \param[out] R_out, G_out, B_out  - output RGB image
- *  \param[in]  height               - image height
  *  \param[in]  width                - image width
+ *  \param[in]  height               - image height
  *  \param[in]  p                    - padding parameter
  *  \param[in]  saturation           - saturation scale adjustment parameter (0..4)
  *  \param[in]  k                    - clipping shape parameter (0 - hard clipping, 1+ - use generalized harmonic mean compander)
  *
  *  \returns    DFX_SUCCESS if success, error code otherwise
  */
-int adjust_saturation(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out, float* B_out, int width, int height, int p, float saturation, int k)
+int adjust_saturation(const float* R_in, const float* G_in, const float* B_in, float* R_out, float* G_out, float* B_out, int width, int height, int p, float saturation, int k)
 { 
 	/* local constants: */
 	const int colors = COLORS_SRGB;			/* input/output color space */
@@ -955,7 +1075,7 @@ int adjust_saturation(float* R_in, float* G_in, float* B_in, float* R_out, float
 
 	/* convert RGB image to XYZ and then Luv: */
 	if ((err = linear_rgb_to_xyz(R_in, G_in, B_in, X, Y, Z, width, height, p, colors, Y_white)) == DFX_SUCCESS
-		&& (err = xyz_to_lyv(X, Y, Z, L, u, v, width, height, p, colors, Y_white)) == DFX_SUCCESS) {
+		&& (err = xyz_to_luv(X, Y, Z, L, u, v, width, height, p, colors, Y_white)) == DFX_SUCCESS) {
 
 		/* perform saturation adjustment: */
 		for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
@@ -980,7 +1100,7 @@ int adjust_saturation(float* R_in, float* G_in, float* B_in, float* R_out, float
 		}
 
 		/* convert Luv image back to XYZ and then RGB: */
-		err = lyv_to_xyz(L, u, v, X, Y, Z, width, height, p, colors, Y_white);
+		err = luv_to_xyz(L, u, v, X, Y, Z, width, height, p, colors, Y_white);
 		if (err == DFX_SUCCESS)
 			err = xyz_to_linear_rgb(X, Y, Z, R_out, G_out, B_out, width, height, p, colors, Y_white);
 	}
@@ -999,14 +1119,14 @@ int adjust_saturation(float* R_in, float* G_in, float* B_in, float* R_out, float
  *
  *  \param[in]  R_in, G_in, B_in     - input linear RGB image
  *  \param[out] R_out, G_out, B_out  - output RGB image
- *  \param[in]  height               - image height
  *  \param[in]  width                - image width
+ *  \param[in]  height               - image height
  *  \param[in]  p                    - padding parameter
- *  \param[in]  theta                  - hue adjustment parameter (+-Pi/2)
+ *  \param[in]  theta                - hue rotation angle in radians (-pi..pi)
  *
  *  \returns    DFX_SUCCESS if success, error code otherwise
  */
-int adjust_hue(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out, float* B_out, int width, int height, int p, float theta)
+int adjust_hue(const float* R_in, const float* G_in, const float* B_in, float* R_out, float* G_out, float* B_out, int width, int height, int p, float theta)
 {
 	/* local constants: */
 	const int colors = COLORS_SRGB;			/* assumed input/output color space */
@@ -1024,7 +1144,7 @@ int adjust_hue(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out
 	if (R_in == NULL || G_in == NULL || B_in == NULL) return DFX_INVARG;
 	if (R_out == NULL || G_out == NULL || B_out == NULL) return DFX_INVARG;
 	if (height < 0 || width < 0 || p < 0) return DFX_INVARG;
-	if (theta < -M_PI || theta > M_PI) return DFX_INVARG;
+	if (theta < -(float)M_PI || theta > (float)M_PI) return DFX_INVARG;	/* compare as floats: (float)M_PI > M_PI in double */
 
 	/* initialize uv color tables: */
 	gen_uv_prim();
@@ -1039,7 +1159,7 @@ int adjust_hue(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out
 
 	/* convert RGB image to XYZ and then L*u*v*: */
 	if ((err = linear_rgb_to_xyz(R_in, G_in, B_in, X, Y, Z, width, height, p, colors, Y_white)) == DFX_SUCCESS
-		&& (err = xyz_to_lyv(X, Y, Z, L, u, v, width, height, p, colors, Y_white)) == DFX_SUCCESS) {
+		&& (err = xyz_to_luv(X, Y, Z, L, u, v, width, height, p, colors, Y_white)) == DFX_SUCCESS) {
 
 		/* scan image: */
 		for (y = 0; y < height; y++) for (x = 0; x < width; x++) {
@@ -1065,7 +1185,7 @@ int adjust_hue(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out
 		}
 
 		/* convert Luv image back to XYZ and then RGB: */
-		err = lyv_to_xyz(L, u, v, X, Y, Z, width, height, p, colors, Y_white);
+		err = luv_to_xyz(L, u, v, X, Y, Z, width, height, p, colors, Y_white);
 		if (err == DFX_SUCCESS)
 			err = xyz_to_linear_rgb(X, Y, Z, R_out, G_out, B_out, width, height, p, colors, Y_white);
 	}

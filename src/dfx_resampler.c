@@ -2,20 +2,28 @@
  *  \file   dfx_resampler.c
  *  \brief  Image resampling functions.
  * 
- *  This module implements separable, polyphase-filter-based resampler. 
+ *  This module implements a separable, polyphase-filter-based resampler. 
  *  It follows the design explained in:  
- *   R. E. Crochiere, and L. R. Rabiner, "Interpolation and decimation of digital 
- *   signals — A tutorial review," Proc. IEEE 69, no. 3, 2005, pp. 300-331.
+ *   R. E. Crochiere and L. R. Rabiner, "Interpolation and decimation of digital 
+ *   signals - A tutorial review," Proc. IEEE, vol. 69, no. 3, pp. 300-331, March 1981.
+ *
+ *  Resampling by a rational factor M/N (M = output size, N = input size, after removing
+ *  their common divisor) is modeled as upsampling by M (inserting M-1 zeros between samples),
+ *  low-pass filtering at the high rate with cutoff 1/(2 max(M,N)) cycles per sample, and
+ *  decimation by N. The low-pass prototype h has 2Mn+1 taps. Only the taps that meet nonzero
+ *  samples are used: output sample j takes input samples around j0 = floor(jN/M) with the
+ *  coefficients h[kM - phase], phase = jN mod M, k = -n..n. These M sub-filters of 2n+1
+ *  taps are the polyphase components of h. Output sample j is thus placed at the input
+ *  coordinate jN/M, i.e. sample 0 of the output coincides with sample 0 of the input.
  * 
  *  Copyright (c) 2026 Yuriy A. Reznik
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.01
- *  \date    March 7, 2026
+ *  \version 1.02
+ *  \date    November 8, 2026
  */
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdlib.h>
 #include "dfx.h"
@@ -34,13 +42,13 @@
 /*!
  *  \brief Generate an array of LP filter coefficients.
  *
- *  This function uses the classic 2n+1=point sinc filter smoothed by the Lanczos window.
+ *  This function uses the classic (2n+1)-point sinc filter smoothed by the Lanczos window.
  *  This array of coefficients is allocated and returned by a pointer *p_w.
  *  The calling application is responsible for freeing it when it is no longer needed.
  * 
- *  \param[out]  p_w  - pointer to an array of filter coefficients to generate
- *  \param[in]   n    - filter width (max lag in each direction)
- *  \param[in]   fc   - cutoff frequency
+ *  \param[out]  p_w  - pointer to a variable to receive the pointer to the array of 2n+1 coefficients
+ *  \param[in]   n    - filter half-length (max lag in each direction)
+ *  \param[in]   fc   - cutoff frequency in cycles per sample, 0 < fc <= 0.5
  *
  *  \returns     DFX_X error code
  */
@@ -56,7 +64,7 @@ static int gen_coeffs(float **p_w, int n, float fc)
 
     /* allocate an array for LP filter coefficients: */
     *p_w = NULL;
-    if ((w = (float*)malloc((2 * n + 2) * sizeof(float))) == NULL) 
+    if ((w = (float*)malloc((2 * n + 1) * sizeof(float))) == NULL) 
         return DFX_NOMEM;
 
     /* generate filter coefficients: */
@@ -100,9 +108,9 @@ static int gcd(int a, int b)
 /*!
   *  \brief Apply gain to filter coefficients.
   *
-  *  \param[in,out]  p    - filter coefficients
-  *  \param[in]      n    - filter width (max lag in each direction)
-  *  \param[in]      gain - gain to apply
+  *  \param[in,out]  w    - 2n+1 filter coefficients
+  *  \param[in]      n    - filter half-length (max lag in each direction)
+  *  \param[in]      gain - DC gain the coefficients should have on return
   *
   *  \returns        DFX_X error code
   */
@@ -128,10 +136,10 @@ static int apply_gain(float* w, int n, float gain)
  *  This array of coefficients is allocated and returned by a pointer *p_W.
  *  The calling application is responsible for freeing it when it is no longer needed.
  *
- *  \param[in,out]  p_W       - pointer to an array of filter coefficients, defining filters for each phase 
+ *  \param[out]     p_W       - pointer to a variable to receive the pointer to the array of M*(2n+1) coefficients (2n+1 for each phase) 
  *  \param[in]      dim_in    - input dimension of an image (width or height) 
  *  \param[in]      dim_out   - output dimension of an image (width or height)
- *  \param[in]      n         - filter width (max lag in each direction)
+ *  \param[in]      n         - filter half-length (max lag in each direction)
  *
  *  \returns        DFX_X error code
  */
@@ -153,8 +161,8 @@ static int gen_polyphase_coeffs(float **p_W, int dim_in, int dim_out, int n)
     fc = (M < N) ? 0.5f / (float)N : 0.5f / (float)M; 
  
     /* generate filter coefficients: */
-    if (gen_coeffs(&w, M * n, fc) != DFX_SUCCESS)
-        return DFX_NOMEM;
+    if ((i = gen_coeffs(&w, M * n, fc)) != DFX_SUCCESS)
+        return i;
 
     /* allocate an array for per-phase sorted LP filter coefficients: */
     *p_W = NULL;
@@ -174,10 +182,10 @@ static int gen_polyphase_coeffs(float **p_W, int dim_in, int dim_out, int n)
         for (; j < M * 2 * n + 1; j += M, i++)
             W[phase*(2*n+1) + i] = w[j];
 
-        /* By books, I should set the overall filter gain to M, and then 
-         * sub-sample the coefficients to M phases. However, with short filter legths 
+        /* By the books, I should set the overall filter gain to M, and then 
+         * sub-sample the coefficients to M phases. However, with short filter lengths 
          * (and truncated sinc-type filters) this causes some fluctuations of the 
-         * filer gains on phase-level. To minimize such effects, I apply gain 
+         * filter gains on phase-level. To minimize such effects, I apply gain 
          * on per-phase level, which unifies gains for all filters. */
         apply_gain(&W[phase * (2*n + 1)], n, 1.0f); 
     }
@@ -195,15 +203,15 @@ static int gen_polyphase_coeffs(float **p_W, int dim_in, int dim_out, int n)
  *  \param[out] y          - pointer to a row in output image
  *  \param[in]  width_in   - source image width
  *  \param[in]  width_out  - output image width
- *  \param[in]  n          - filter length
+ *  \param[in]  n          - filter half-length
  *  \param[in]  W          - polyphase filter coefficients
  *
  *  \returns        DFX_X error code
  */
-static int polyphase_filter_row(float* x, float* y, int width_in, int width_out, int n, float *W)
+static int polyphase_filter_row(const float* x, float* y, int width_in, int width_out, int n, const float *W)
 {
     int M, N, j, j0, k, l, phase;
-    float s;
+    double s;
 
     /* check parameters: */
     if (x == NULL || y == NULL || W == NULL) return DFX_INVARG;
@@ -223,7 +231,7 @@ static int polyphase_filter_row(float* x, float* y, int width_in, int width_out,
         for (k = -n, s = 0.; k <= n; k++) 
             s += x[j0 + k] * W[phase * (2 * n + 1) + n + k];
         /* save the result: */
-        y[j] = s;
+        y[j] = (float)s;
     }
 
     return DFX_SUCCESS;
@@ -234,18 +242,18 @@ static int polyphase_filter_row(float* x, float* y, int width_in, int width_out,
  *
  *  \param[in]  x          - pointer to a column in source image
  *  \param[out] y          - pointer to a column in output image
- *  \param[in]  width      - image width (the same for input & output, including padding)
- *  \param[in]  height_in  - source image width 
- *  \param[in]  height_out - output image width 
- *  \param[in]  n          - filter length
+ *  \param[in]  width      - image width (the same for input & output, including padding) = distance between consecutive samples of a column
+ *  \param[in]  height_in  - source image height 
+ *  \param[in]  height_out - output image height 
+ *  \param[in]  n          - filter half-length
  *  \param[in]  W          - polyphase filter coefficients
  *
  *  \returns        DFX_X error code
  */
-static int polyphase_filter_col(float* x, float* y, int width, int height_in, int height_out, int n, float* W)
+static int polyphase_filter_col(const float* x, float* y, int width, int height_in, int height_out, int n, const float* W)
 {
     int M, N, i, i0, k, l, phase;
-    float s;
+    double s;
 
     /* check parameters: */
     if (x == NULL || y == NULL || W == NULL) return DFX_INVARG;
@@ -264,7 +272,7 @@ static int polyphase_filter_col(float* x, float* y, int width, int height_in, in
         /* apply filter: */
         for (k = -n, s = 0.; k <= n; k++)
             s += x[(i0 + k) * width] * W[phase * (2 * n + 1) + n + k];
-        y[i * width] = s;
+        y[i * width] = (float)s;
     }
 
     return DFX_SUCCESS;
@@ -273,38 +281,40 @@ static int polyphase_filter_col(float* x, float* y, int width, int height_in, in
 /*!
  *  \brief Image plane resampler.
  * 
- *  This function implements separable row/column resampler utilizing polyphase filters. 
- *  Both input and output images are assumed to be padded with boundary (p) at least as large as 
- *  filter length (n) employed. 
+ *  This function implements a separable row/column resampler utilizing polyphase filters. 
+ *  Both input and output planes must be allocated with the same padding p, at least as large as 
+ *  the filter half-length n. The input must be padded (see pad_plane()); the output receives
+ *  PAD_REPLICATE padding.
  *  
  *  \param[in]  X           - input image plane
- *  \param[out] Y           - output resampled image
- *  \param[in]  width_in    - input image width
- *  \param[in]  height_in   - input image height
- *  \param[in]  width_out   - input image width
- *  \param[in]  height_out  - input image height
+ *  \param[out] Y           - output resampled image plane
+ *  \param[in]  width_in    - input image width (> 1)
+ *  \param[in]  height_in   - input image height (> 1)
+ *  \param[in]  width_out   - output image width (> 1)
+ *  \param[in]  height_out  - output image height (> 1)
  *  \param[in]  p           - padding parameter
- *  \param[in]  n           - filter width (max lag in each direction)
+ *  \param[in]  n           - filter half-length (max lag in each direction), 1 <= n <= p
  *
  *  \returns    DFX_X error code
  */
-int resample_plane(float* X, float* Y, int width_in, int height_in, int width_out, int height_out, int p, int n)
+int resample_plane(const float* X, float* Y, int width_in, int height_in, int width_out, int height_out, int p, int n)
 {
     /* local buffers: */
     float *Z = NULL;		                /* temporary plane holding the results of row-filtering */
-    float *W_row = NULL, *W_col = NULL;	    /* filter coeffs for scaling horisontally and vertically */
-    int x, y;
+    float *W_row = NULL, *W_col = NULL;	    /* filter coeffs for scaling horizontally and vertically */
+    int x, y, err;
 
     /* check parameters */
     if (X == NULL || Y == NULL) return DFX_INVARG;
-    if (height_in < 0 || width_in < 0 || p < 1 || n < 1 || n > p) return DFX_INVARG;    /* n must be <= p! */
+    if (height_in <= 1 || width_in <= 1 || height_out <= 1 || width_out <= 1) return DFX_INVARG;
+    if (p < 1 || n < 1 || n > p) return DFX_INVARG;    /* n must be <= p! */
 
     /* allocate temp image of size [out_width x in_height] + padding: */
-    if (alloc_plane(&Z, width_out, height_in, p) != DFX_SUCCESS) return DFX_NOMEM;
+    if ((err = alloc_plane(&Z, width_out, height_in, p)) != DFX_SUCCESS) return err;
 
     /* generate polyphase filter coefficients: */
-    if (gen_polyphase_coeffs(&W_row, width_in, width_out, n) != DFX_SUCCESS) { free_plane(Z); return DFX_NOMEM; }
-    if (gen_polyphase_coeffs(&W_col, height_in, height_out, n) != DFX_SUCCESS) { free_plane(Z); free_coeffs(W_row); return DFX_NOMEM; }
+    if ((err = gen_polyphase_coeffs(&W_row, width_in, width_out, n)) != DFX_SUCCESS) { free_plane(Z); return err; }
+    if ((err = gen_polyphase_coeffs(&W_col, height_in, height_out, n)) != DFX_SUCCESS) { free_plane(Z); free_coeffs(W_row); return err; }
 
     /* resample rows, including extra +-n rows in the padded region to support subsequent vertical processing: */
     for (y = -n; y < height_in + n; y++) {
@@ -324,32 +334,33 @@ int resample_plane(float* X, float* Y, int width_in, int height_in, int width_ou
             width_out + 2 * p, height_in, height_out, n, W_col);
     }
 
-    /* free intermediate buffers & exit: */
+    /* free intermediate buffers: */
     free_plane(Z);
     free_coeffs(W_row);
     free_coeffs(W_col);
 
-    return DFX_SUCCESS;
+    /* fill the padding of the output plane & exit: */
+    return pad_plane(Y, width_out, height_out, p, PAD_REPLICATE);
 }
 
 /*!
- *  \brief Resample linear RGB image.
+ *  \brief Resample linear RGB image (see resample_plane()).
  */
-int resample_image(float* R_in, float* G_in, float* B_in, float* R_out, float* G_out, float* B_out, 
+int resample_image(const float* R_in, const float* G_in, const float* B_in, float* R_out, float* G_out, float* B_out, 
     int width_in, int height_in, int width_out, int height_out, int p, int n)
 {
+    int err;
+
     /* check parameters */
     if (R_in == NULL || G_in == NULL || B_in == NULL) return DFX_INVARG;
     if (R_out == NULL || G_out == NULL || B_out == NULL) return DFX_INVARG;
-    if (width_in < 0 || height_in < 0 || width_out < 0 || height_out < 0) return DFX_INVARG;
+    if (width_in <= 1 || height_in <= 1 || width_out <= 1 || height_out <= 1) return DFX_INVARG;
     if (p < 1 || n < 1 || n > p) return DFX_INVARG;
 
     /* resample planes: */
-    resample_plane(R_in, R_out, width_in, height_in, width_out, height_out, p, n);
-    resample_plane(G_in, G_out, width_in, height_in, width_out, height_out, p, n);
-    resample_plane(B_in, B_out, width_in, height_in, width_out, height_out, p, n);
-
-    return DFX_SUCCESS;
+    if ((err = resample_plane(R_in, R_out, width_in, height_in, width_out, height_out, p, n)) != DFX_SUCCESS) return err;
+    if ((err = resample_plane(G_in, G_out, width_in, height_in, width_out, height_out, p, n)) != DFX_SUCCESS) return err;
+    return resample_plane(B_in, B_out, width_in, height_in, width_out, height_out, p, n);
 }
 
 /* dfx_resampler.c -- end of file */
