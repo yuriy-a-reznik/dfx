@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2 (2026-11-08)
+
+Binary images and regions (new modules `dfx_binary.c` and `dfx_regions.c`)
+- A binary image is a plane of unsigned chars holding 0 (OFF) or 1 (ON), with the same
+  padded geometry as a float plane; connected-component labels are planes of ints. The
+  set operations of morphology are kept apart from the arithmetic of linear planes: a
+  plane becomes a binary image only through thresholding, and a binary image becomes a
+  plane again only through `binary_to_plane()`.
+- Thresholding: `threshold_plane()`, `histogram_plane()`, `otsu_threshold()`,
+  `ridler_calvard_threshold()`, `niblack_threshold_plane()`, `double_threshold_plane()`.
+- Morphology: `structuring_element()` (cross, box, disk of any radius), `dilate_binary()`,
+  `erode_binary()`, `open_binary()`, `close_binary()`, `majority_binary()`,
+  `hitmiss_binary()` (ternary structuring elements), `thin_binary()`, `thicken_binary()`,
+  `boundary_binary()`; set operations `not/and/or/xor/subtract_binary()`, `count_binary()`.
+- Regions: `floodfill_labels()`, `label_binary()` (union-find) and `label_binary_floodfill()`,
+  `select_label()`, `labels_to_image()`, `reconstruct_binary()`, `fill_holes_binary()`,
+  `region_properties()` (area, bounding box, centroid, central moments, orientation,
+  eccentricity, equivalent ellipse, perimeter, compactness), `trace_boundary_binary()`
+  (Moore tracing and wall following, Freeman chain codes), `chain_code_length()`
+  (Freeman, Pythagorean, Kimura), `chamfer_binary()`, `grow_region_plane()`.
+- New `dfx_binary_demo` (also a Visual Studio project): synthesizes a test scene, runs the
+  whole chain, and checks the measurements against the known shapes; `make check` runs it.
+
 ## 1.1 (2026-11-08)
 
 Portability

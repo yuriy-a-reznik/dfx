@@ -42,7 +42,19 @@
  *  *  Single planes. Functions whose names end in _plane operate on one
  *     float plane; functions ending in _image apply the same operation to
  *     the three planes of an RGB image. Planes may also hold other
- *     quantities (luminance, XYZ or L*u*v* components, DFT spectra).
+ *     quantities (luminance, XYZ or L*u*v* components, DFT spectra,
+ *     distances).
+ *
+ *  *  Binary images. A binary image is a set of pixels, stored as a plane
+ *     of unsigned chars with the values 0 (OFF, background) and 1 (ON,
+ *     foreground) and exactly the same padded geometry as a float plane.
+ *     Functions whose names end in _binary operate on binary images. The
+ *     operations of mathematical morphology are set operations and are kept
+ *     strictly apart from the arithmetic of linear planes: a plane becomes
+ *     a binary image only through thresholding (threshold_plane() and its
+ *     relatives), and a binary image becomes a plane again only through
+ *     binary_to_plane(). Connected components are numbered in label planes,
+ *     arrays of ints of the same geometry holding 0 for the background.
  *
  *  Modules
  *  -------
@@ -57,6 +69,10 @@
  *  *  dfx_dct.c       - fast 1D DCT-II and DCT-IV algorithms
  *  *  dfx_colors.c    - RGB <-> XYZ <-> L*u*v* / L*a*b* conversions, color adjustments
  *  *  dfx_snr.c       - MSE and SNR metrics
+ *  *  dfx_binary.c    - binary images: thresholding, structuring elements, dilation, erosion, opening,
+ *                       closing, majority filter, hit-or-miss, thinning, thickening, boundaries
+ *  *  dfx_regions.c   - regions: floodfill, connected components, region properties, boundary tracing
+ *                       and chain codes, chamfer distance transform, region growing
  *
  *  Error handling
  *  --------------
@@ -72,7 +88,7 @@
  *  Licensed under the MIT License: https://opensource.org/licenses/MIT
  *
  *  \author  Yuriy A. Reznik
- *  \version 1.1
+ *  \version 1.2
  *  \date    November 8, 2026
  */
 
@@ -136,6 +152,44 @@ enum {
 	DFX_NOMEM = 5,		/* out of memory */
 	DFX_INVRANGE = 6	/* pixel values are outside of the valid range */
 };
+
+/*! Shapes of structuring elements (parameter shape of structuring_element()): */
+enum {
+	SE_CROSS = 0,		/* |i| + |j| <= n: the city-block ball; for n = 1 the 4-neighborhood (B4) */
+	SE_BOX = 1,			/* max(|i|, |j|) <= n: the chessboard ball; for n = 1 the 8-neighborhood (B8) */
+	SE_DISK = 2,		/* i^2 + j^2 <= n^2: the discrete Euclidean ball */
+	N_SES				/* the number of supported shapes */
+};
+
+/*! Values of a ternary structuring element (parameter B of hitmiss_binary()): */
+enum {
+	SE_OFF = 0,			/* the pixel must be OFF */
+	SE_ON = 1,			/* the pixel must be ON */
+	SE_DONTCARE = 2		/* the pixel is not examined */
+};
+
+/*! Boundary length estimators (parameter method of chain_code_length()): */
+enum {
+	CHAIN_FREEMAN = 0,		/* N_o + sqrt(2) N_d */
+	CHAIN_PYTHAGOREAN = 1,	/* sqrt(N_d^2 + (N_o + N_d)^2) */
+	CHAIN_KIMURA = 2,		/* sqrt(N_d^2 + (N_d + N_o/2)^2) + N_o/2 */
+	N_CHAIN_METHODS			/* the number of supported estimators */
+};
+
+/*! Properties of a region of a binary image (filled by region_properties()): */
+typedef struct {
+	int    area;				/* number of pixels (the zeroth-order moment m00) */
+	int    x_min, x_max;		/* bounding box: horizontal extent, inclusive */
+	int    y_min, y_max;		/* bounding box: vertical extent, inclusive */
+	double x_c, y_c;			/* centroid (m10 / m00, m01 / m00) */
+	double mu20, mu11, mu02;	/* central second-order moments (sums over pixels, not divided by the area) */
+	double theta;				/* orientation of the major axis of the equivalent ellipse: the angle from the x axis towards the y axis, in (-pi/2, pi/2] */
+	double eccentricity;		/* eccentricity of the equivalent ellipse: 0 for a disk, approaching 1 for a line */
+	double a, b;				/* semi-axes of the equivalent ellipse, a >= b */
+	int    perimeter;			/* number of boundary pixels: region pixels with a 4-neighbor outside the region */
+	double perimeter_length;	/* length of the outer boundary estimated by Kimura's formula from its chain code */
+	double compactness;			/* 4 pi area / perimeter_length^2: about 1 for a disk (slightly above 1 for digitized disks), less for other shapes */
+} dfx_region;
 
 /********************
  *
@@ -491,6 +545,212 @@ extern int adjust_hue(const float* R_in, const float* G_in, const float* B_in, f
 extern int snr_plane(const float* X_ref, const float* X_test, int width, int height, int p, float* p_MSE, float* p_SNR);
 /*! \brief Compute MSE and SNR between two images, pooling the squared errors and energies of the three planes. */
 extern int snr_image(const float* R_ref, const float* G_ref, const float* B_ref, const float* R_test, const float* G_test, const float* B_test, int width, int height, int p, float* p_MSE, float* p_SNR);
+
+/********************
+ *
+ *  Binary images (dfx_binary.c)
+ *
+ *  A binary image for a width x height image with padding p is an array of
+ *  (width + 2p) x (height + 2p) unsigned chars holding 0 (OFF) or 1 (ON),
+ *  the pixel (x,y) being stored at index (p + y) * (width + 2p) + (p + x),
+ *  exactly like a float plane. Set operations and thresholding process the
+ *  padded area as well. The morphological operations read the padding of
+ *  their input as the outside of the image (pad_binary() with PAD_ZERO makes
+ *  the outside background; PAD_REPLICATE, the convention of all outputs,
+ *  continues the image beyond its boundary) and leave their output
+ *  replicate-padded. Operations with a structuring element of radius n
+ *  require p >= n, like filters.
+ */
+
+/*! \brief Allocate a binary image for a width x height image with padding p; free it with free_binary(). */
+extern int alloc_binary(unsigned char** pA, int width, int height, int p);
+/*! \brief Deallocate a binary image. */
+extern int free_binary(unsigned char* A);
+/*! \brief Fill a binary image (padding included) with 0 or 1. */
+extern int fill_binary(unsigned char* A, int width, int height, int p, int value);
+/*! \brief Fill the padding border of a binary image by one of the PAD_* rules (see pad_plane()). */
+extern int pad_binary(unsigned char* A, int width, int height, int p, int padding_type);
+/*! \brief Copy a binary image (padding included). */
+extern int copy_binary(const unsigned char* A_in, unsigned char* A_out, int width, int height, int p);
+
+/* Set operations process the padded area as well; their output may be the same as one of their inputs. */
+/*! \brief Complement: A_out = NOT A. */
+extern int not_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p);
+/*! \brief Intersection: A_out = A AND B. */
+extern int and_binary(const unsigned char* A, const unsigned char* B, unsigned char* A_out, int width, int height, int p);
+/*! \brief Union: A_out = A OR B. */
+extern int or_binary(const unsigned char* A, const unsigned char* B, unsigned char* A_out, int width, int height, int p);
+/*! \brief Symmetric difference: A_out = A XOR B. */
+extern int xor_binary(const unsigned char* A, const unsigned char* B, unsigned char* A_out, int width, int height, int p);
+/*! \brief Set difference: A_out = A AND NOT B. */
+extern int subtract_binary(const unsigned char* A, const unsigned char* B, unsigned char* A_out, int width, int height, int p);
+/*! \brief Count the ON pixels in the interior of a binary image (the area of the foreground). */
+extern int count_binary(const unsigned char* A, int width, int height, int p, int* p_count);
+
+/*!
+ *  \brief Convert a binary image to a plane of 0.0 and 1.0 values (padding included).
+ *  Interpreted as luminance (see luminance_to_grayscale_image()), the plane displays the image in black and white.
+ */
+extern int binary_to_plane(const unsigned char* A, float* X, int width, int height, int p);
+/*! \brief Threshold a plane: A = (X > tau), padding included. */
+extern int threshold_plane(const float* X, unsigned char* A, int width, int height, int p, float tau);
+/*!
+ *  \brief Compute the histogram of the interior of a plane: nbins equal bins over [lo, hi), with out-of-range
+ *  values counted in the end bins. hist must hold nbins ints.
+ */
+extern int histogram_plane(const float* X, int width, int height, int p, float lo, float hi, int nbins, int* hist);
+/*!
+ *  \brief Find a global threshold by Otsu's method (maximum between-class variance of the histogram).
+ *
+ *  The plane is quantized into nbins levels over [lo, hi] (for luminance: 0, 1, and e.g. 256 levels). The threshold
+ *  returned in *p_tau separates the two classes of levels: threshold_plane(X, A, ..., tau) turns exactly the pixels of
+ *  the upper class ON (tau is the largest value below the first level of that class).
+ */
+extern int otsu_threshold(const float* X, int width, int height, int p, float lo, float hi, int nbins, float* p_tau);
+/*!
+ *  \brief Find a global threshold by the Ridler-Calvard iterative method: tau <- (mean below tau + mean above tau) / 2
+ *  until convergence. Same parameters as otsu_threshold().
+ */
+extern int ridler_calvard_threshold(const float* X, int width, int height, int p, float lo, float hi, int nbins, float* p_tau);
+/*!
+ *  \brief Adaptive thresholding by Niblack's method: A = (X > mu - k sigma), where mu and sigma are the mean
+ *  and standard deviation of the (2n+1) x (2n+1) neighborhood of each pixel (typically k = 0.2).
+ *  The input must be padded with p >= n >= 1; the output is replicate-padded.
+ */
+extern int niblack_threshold_plane(const float* X, unsigned char* A, int width, int height, int p, int n, float k);
+/*!
+ *  \brief Double thresholding (hysteresis): the connected components of (X > tau_lo) that contain a pixel of (X > tau_hi).
+ *  \param[in] connectivity - 4 or 8
+ */
+extern int double_threshold_plane(const float* X, unsigned char* A, int width, int height, int p, float tau_lo, float tau_hi, int connectivity);
+
+/*!
+ *  \brief Generate a structuring element of radius n and the given shape (SE_CROSS, SE_BOX, SE_DISK).
+ *  \param[out] B - array of (2n+1) x (2n+1) values; B[(j + n) * (2n+1) + (i + n)] is the value at offset (i,j)
+ */
+extern int structuring_element(unsigned char* B, int n, int shape);
+/*!
+ *  \brief Dilation: A_out(z) = OR over b in B of A(z - b).
+ *
+ *  \param[in]  A      - input binary image, padded with p >= n
+ *  \param[out] A_out  - output binary image (may be the same as A); receives PAD_REPLICATE padding
+ *  \param[in]  B      - structuring element of (2n+1) x (2n+1) values 0/1 (see structuring_element())
+ *  \param[in]  n      - radius of the structuring element, 0 <= n <= p
+ */
+extern int dilate_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, const unsigned char* B, int n);
+/*! \brief Erosion: A_out(z) = AND over b in B of A(z + b). Same parameters as dilate_binary(). */
+extern int erode_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, const unsigned char* B, int n);
+/*! \brief Opening: erosion followed by dilation (removes foreground details smaller than B). Same parameters as dilate_binary(). */
+extern int open_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, const unsigned char* B, int n);
+/*! \brief Closing: dilation followed by erosion (fills background details smaller than B). Same parameters as dilate_binary(). */
+extern int close_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, const unsigned char* B, int n);
+/*!
+ *  \brief Majority (median) filter over the (2n+1) x (2n+1) neighborhood: A_out = 1 where more than half of the neighbors are ON.
+ *  Requires p >= n; the output is replicate-padded and may be the same as the input.
+ */
+extern int majority_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, int n);
+/*!
+ *  \brief Hit-or-miss transform: A_out(z) = 1 where the ternary pattern B matches the image around z.
+ *  Requires p >= n; the output is replicate-padded and may be the same as the input.
+ *  \param[in] B - (2n+1) x (2n+1) values SE_ON (pixel must be ON), SE_OFF (must be OFF), SE_DONTCARE
+ */
+extern int hitmiss_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, const unsigned char* B, int n);
+/*!
+ *  \brief Thinning: repeatedly remove the pixels matched by the eight thinning structuring elements (Birchfield, Fig. 4.14).
+ *
+ *  Iterated to convergence, thinning yields an approximate skeleton. Requires p >= 1; the padding of the input decides
+ *  what lies outside the image for the whole iteration (PAD_ZERO: background). The output is replicate-padded.
+ *  \param[in]  n_iter - number of passes over the eight structuring elements, or <= 0 to iterate until convergence
+ *  \param[out] p_iter - if not NULL, receives the number of passes performed
+ */
+extern int thin_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, int n_iter, int* p_iter);
+/*!
+ *  \brief Thickening: repeatedly add the background pixels matched by the eight thickening structuring elements
+ *  (Birchfield, Fig. 4.17). Iterated to convergence, thickening approximates the convex hull. Same parameters as thin_binary().
+ */
+extern int thicken_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, int n_iter, int* p_iter);
+/*!
+ *  \brief Inner boundary of the foreground: A minus its erosion by a 3 x 3 structuring element. Requires p >= 1.
+ *  \param[in] connectivity - 8: the 8-connected boundary (erosion by B4); 4: the thicker 4-connected boundary (erosion by B8)
+ */
+extern int boundary_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, int connectivity);
+
+/********************
+ *
+ *  Regions of binary images (dfx_regions.c)
+ *
+ *  Connected components are numbered 1, 2, 3, ... in order of first
+ *  appearance in row-by-row scanning and stored in label planes: arrays of
+ *  ints with the geometry of a binary image, holding 0 for the background
+ *  (and in the padding). The parameter "connectivity" is 4 or 8 throughout.
+ */
+
+/*! \brief Allocate a label plane; free it with free_labels(). */
+extern int alloc_labels(int** pL, int width, int height, int p);
+/*! \brief Deallocate a label plane. */
+extern int free_labels(int* L);
+/*! \brief Extract one region of a label plane as a binary image: A = (L == label); A is replicate-padded. */
+extern int select_label(const int* L, unsigned char* A, int width, int height, int p, int label);
+/*! \brief Render a label plane as a pseudocolored linear RGB image (black background, one hue per label). */
+extern int labels_to_image(const int* L, float* R, float* G, float* B, int width, int height, int p);
+
+/*!
+ *  \brief Floodfill: replace the value of the connected region of L containing (x0,y0) by new_label (Birchfield, Algorithm 4.4).
+ *  \param[out] p_count - if not NULL, receives the number of pixels filled (0 if the seed already holds new_label)
+ */
+extern int floodfill_labels(int* L, int width, int height, int p, int x0, int y0, int new_label, int connectivity, int* p_count);
+/*!
+ *  \brief Label the connected components of a binary image by the two-pass union-find algorithm (Birchfield, Algorithm 4.8).
+ *  \param[out] L          - label plane: 0 for background pixels, the component number otherwise
+ *  \param[out] p_n_labels - if not NULL, receives the number of components
+ */
+extern int label_binary(const unsigned char* A, int* L, int width, int height, int p, int connectivity, int* p_n_labels);
+/*! \brief Label the connected components by repeated floodfills; gives the same labels as label_binary(). */
+extern int label_binary_floodfill(const unsigned char* A, int* L, int width, int height, int p, int connectivity, int* p_n_labels);
+/*! \brief Morphological reconstruction: the connected components of mask that contain an ON pixel of seeds. */
+extern int reconstruct_binary(const unsigned char* mask, const unsigned char* seeds, unsigned char* A_out, int width, int height, int p, int connectivity);
+/*! \brief Fill the holes of the foreground (the background components not connected to the image boundary); connectivity refers to the background. */
+extern int fill_holes_binary(const unsigned char* A, unsigned char* A_out, int width, int height, int p, int connectivity);
+
+/*!
+ *  \brief Trace the boundary of the region containing (x0,y0) clockwise and return it as a Freeman chain code.
+ *
+ *  Codes 0..7 denote steps east, north-east, north (up), north-west, west, south-west, south, south-east.
+ *  connectivity = 8 traces the 8-connected boundary (Moore's neighbor tracing, Jacob's stopping criterion),
+ *  connectivity = 4 the 4-connected boundary (wall following). Pixels outside of the image count as OFF.
+ *  The trace follows the boundary between the region and the background containing the OFF pixel above the start:
+ *  from the first pixel of a region in scanning order, that is the outer boundary; from a pixel below a hole, the hole's.
+ *
+ *  \param[in]  x0, y0     - starting pixel: ON, with an OFF pixel or the image border above it
+ *  \param[out] chain      - array for the codes, or NULL to only count them
+ *  \param[in]  max_length - capacity of chain
+ *  \param[out] p_length   - receives the number of codes (0 for an isolated pixel)
+ *  \return DFX_INVARG for an invalid starting pixel, DFX_NOMEM if the chain does not fit into max_length codes.
+ */
+extern int trace_boundary_binary(const unsigned char* A, int width, int height, int p, int x0, int y0, int connectivity, unsigned char* chain, int max_length, int* p_length);
+/*! \brief Estimate the length of a boundary from its chain code by CHAIN_FREEMAN, CHAIN_PYTHAGOREAN, or CHAIN_KIMURA. */
+extern int chain_code_length(const unsigned char* chain, int length, int method, double* p_length);
+
+/*!
+ *  \brief Compute the properties of region "label" of a label plane: area, bounding box, centroid, central moments,
+ *  orientation, eccentricity and semi-axes of the equivalent ellipse, boundary pixel count, boundary length, compactness.
+ *  \return DFX_INVRANGE if no pixel carries the label.
+ */
+extern int region_properties(const int* L, int width, int height, int p, int label, dfx_region* r);
+/*! \brief Compute the properties of the whole foreground of a binary image, treated as one region. */
+extern int region_properties_binary(const unsigned char* A, int width, int height, int p, dfx_region* r);
+
+/*!
+ *  \brief Chamfer distance transform (Birchfield, Algorithm 4.10): D = distance from each pixel to the nearest ON pixel,
+ *  with step costs a (horizontal/vertical) and b (diagonal): (1,1) chessboard, b >= 2a city-block, (1,1.35) quasi-Euclidean.
+ *  \return DFX_INVRANGE if the image has no ON pixel.
+ */
+extern int chamfer_binary(const unsigned char* A, float* D, int width, int height, int p, float a, float b);
+/*!
+ *  \brief Seeded region growing: starting from (x0,y0), add neighboring pixels whose values stay within tolerance
+ *  of the running mean of the region. A receives the region grown.
+ */
+extern int grow_region_plane(const float* X, unsigned char* A, int width, int height, int p, int x0, int y0, float tolerance, int connectivity);
 
 #ifdef __cplusplus
 }

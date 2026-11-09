@@ -1,6 +1,6 @@
 # dfx
 
-DFX: Digital image processing Functions and eXamples. Version 1.1.
+DFX: Digital image processing Functions and eXamples. Version 1.2.
 
 This library provides a collection of basic image-processing primitives
 implemented entirely in C, without relying on external libraries. It is
@@ -53,6 +53,26 @@ color, filtering, and resampling operations are performed on linear-light
 
 * `snr_plane()` and `snr_image()` compute MSE and SNR between two images.
 
+* Binary images (sets of pixels, stored as planes of 0/1 values with the
+  same padded geometry as linear planes) are produced from luminance or any
+  other plane by `threshold_plane()`, with global thresholds from
+  `otsu_threshold()` and `ridler_calvard_threshold()`, locally adaptive
+  thresholds from `niblack_threshold_plane()`, or hysteresis from
+  `double_threshold_plane()`. `dilate_binary()`, `erode_binary()`,
+  `open_binary()`, `close_binary()`, `majority_binary()`,
+  `hitmiss_binary()`, `thin_binary()`, `thicken_binary()`, and
+  `boundary_binary()` implement the morphological operations with
+  structuring elements from `structuring_element()`.
+
+* `label_binary()` (union-find) and `label_binary_floodfill()` find the
+  connected components of a binary image; `floodfill_labels()`,
+  `reconstruct_binary()`, and `fill_holes_binary()` are the related
+  connectivity operations. `region_properties()` measures a region (area,
+  centroid, moments, orientation, eccentricity, perimeter, compactness),
+  `trace_boundary_binary()` and `chain_code_length()` trace boundaries as
+  Freeman chain codes, `chamfer_binary()` computes distance transforms, and
+  `grow_region_plane()` performs seeded region growing.
+
 The public interface, with the conventions for image layout and padding, is
 documented in `include/dfx.h`.
 
@@ -61,7 +81,7 @@ documented in `include/dfx.h`.
 On Linux, macOS, or any system with a C compiler and `make`:
 
     make            # builds build/lib/libdfx.a and the examples in build/bin
-    make check      # runs the self-tests (FFT, DCT, zone plate)
+    make check      # runs the self-tests (FFT, DCT, zone plate, binary images)
 
 On Windows, open `build/dfx.sln` in Visual Studio.
 
@@ -85,6 +105,7 @@ Examples demonstrating how to use these operations can be found in the
 | `dfx_fft_demo`         | verifying and timing the fast FFT algorithms                         |
 | `dfx_dct_demo`         | verifying the fast DCT-II and DCT-IV algorithms                      |
 | `dfx_color_adj_demo`   | brightness, saturation, and hue adjustments in CIE L\*u\*v\* space    |
+| `dfx_binary_demo`      | thresholding, morphology, connected components, region properties, chamfer distances, skeletons |
 
 The programs that take an image as input accept 24-bit `.bmp` files; test
 images (the Kodak set at several resolutions, and the zone plate) are in the

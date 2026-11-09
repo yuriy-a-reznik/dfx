@@ -22,6 +22,7 @@
     <ClInclude Include="..\include\dfx.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\src\dfx_binary.c" />
     <ClCompile Include="..\src\dfx_bmp.c" />
     <ClCompile Include="..\src\dfx_colors.c" />
     <ClCompile Include="..\src\dfx_dct.c" />
@@ -32,6 +33,7 @@
     <ClCompile Include="..\src\dfx_resampler.c" />
     <ClCompile Include="..\src\dfx_snr.c" />
     <ClCompile Include="..\src\dfx_image.c" />
+    <ClCompile Include="..\src\dfx_regions.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

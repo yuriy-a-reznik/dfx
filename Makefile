@@ -43,10 +43,12 @@ $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
 # Self-tests: the FFT and DCT demos verify the fast transforms against the direct
-# definitions, and the zone-plate demo must reproduce the reference image bit for bit.
+# definitions, the binary demo checks morphology and region measurements on a synthetic
+# scene, and the zone-plate demo must reproduce the reference image bit for bit.
 check: all
 	$(BIN_DIR)/dfx_fft_demo
 	$(BIN_DIR)/dfx_dct_demo
+	cd $(BIN_DIR) && ./dfx_binary_demo
 	cd $(BIN_DIR) && ./dfx_zone_plate_demo && cmp dfx-zone-plate.bmp $(abspath test/dfx-zone-plate.bmp) && echo "zone plate matches the reference image"
 
 install: lib
